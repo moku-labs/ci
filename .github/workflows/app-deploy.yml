@@ -1,0 +1,123 @@
+name: App Deploy
+
+# Reusable CI + Cloudflare deploy for a Layer-3 moku app (deploys, never publishes to npm).
+#
+# One `validate` job (an app has no split status-check contract to preserve) and a `deploy`
+# job that runs only on a real push to main. Everything the app runs is a package.json SCRIPT
+# name passed as an input — the YAML never grows app-specific commands.
+#
+# Reusable-workflow facts: `github.event_name` / `github.ref` are the CALLER's, so the
+# push-to-main gate below reads the caller's push. The caller owns `concurrency`.
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: Runner label for both jobs.
+        type: string
+        required: false
+        default: ubuntu-latest
+      bun_version:
+        description: Bun version passed to setup-bun ("latest", or a pin like "1.3.8").
+        type: string
+        required: false
+        default: latest
+      lint_script:
+        type: string
+        required: false
+        default: lint
+      typecheck_script:
+        type: string
+        required: false
+        default: typecheck
+      test_script:
+        description: e.g. "test" or "test:coverage".
+        type: string
+        required: false
+        default: test
+      build_script:
+        description: Client build. Runs before the worker build — the worker dry-run reads dist/client as its ASSETS dir.
+        type: string
+        required: false
+        default: build
+      build_worker_script:
+        description: Optional second build (e.g. "build:worker"). Empty = skip.
+        type: string
+        required: false
+        default: ""
+      migrate_script:
+        description: Optional pre-deploy migration script (e.g. "migrate:remote"). Empty = skip.
+        type: string
+        required: false
+        default: ""
+      deploy_script:
+        description: Deploy script (e.g. "deploy" -> `wrangler deploy`).
+        type: string
+        required: false
+        default: deploy
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        description: Scoped Workers deploy token. Passed explicitly — reusable workflows do not inherit secrets.
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        description: Cloudflare account id.
+        required: true
+
+permissions:
+  contents: read # nothing here writes to the repo
+
+jobs:
+  validate:
+    name: Validate (typecheck · lint · test · build)
+    runs-on: ${{ inputs.runs_on }}
+    env:
+      # Untrusted input -> env, never inline in a run block.
+      LINT_SCRIPT: ${{ inputs.lint_script }}
+      TYPECHECK_SCRIPT: ${{ inputs.typecheck_script }}
+      TEST_SCRIPT: ${{ inputs.test_script }}
+      BUILD_SCRIPT: ${{ inputs.build_script }}
+      BUILD_WORKER_SCRIPT: ${{ inputs.build_worker_script }}
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ inputs.bun_version }}
+      - run: bun install --frozen-lockfile
+      - run: bun run "$TYPECHECK_SCRIPT"
+      - run: bun run "$LINT_SCRIPT"
+      - run: bun run "$TEST_SCRIPT"
+      - run: bun run "$BUILD_SCRIPT"
+      - if: inputs.build_worker_script != ''
+        run: bun run "$BUILD_WORKER_SCRIPT"
+
+  deploy:
+    name: Deploy to Cloudflare
+    needs: validate
+    # Only on a real push to main — never on PRs or forks. Inert until the repo carries the
+    # two Cloudflare secrets and the resources exist (d1/kv/r2/queue ids in wrangler.jsonc).
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ${{ inputs.runs_on }}
+    env:
+      BUILD_SCRIPT: ${{ inputs.build_script }}
+      BUILD_WORKER_SCRIPT: ${{ inputs.build_worker_script }}
+      MIGRATE_SCRIPT: ${{ inputs.migrate_script }}
+      DEPLOY_SCRIPT: ${{ inputs.deploy_script }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ inputs.bun_version }}
+      - run: bun install --frozen-lockfile
+      - run: bun run "$BUILD_SCRIPT"
+      - if: inputs.build_worker_script != ''
+        run: bun run "$BUILD_WORKER_SCRIPT"
+      - name: Apply migrations
+        if: inputs.migrate_script != ''
+        run: bun run "$MIGRATE_SCRIPT"
+      - name: Deploy worker + assets
+        run: bun run "$DEPLOY_SCRIPT"

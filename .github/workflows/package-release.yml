@@ -1,0 +1,267 @@
+name: Package Release
+
+# Reusable release + publish pipeline for every moku-family npm package:
+#   check (reuses package-ci.yml) -> release (tag-only) -> package (no token) -> publish (OIDC).
+#
+# Two entry points, decided by the CALLER's event (in a reusable workflow `github.event_name`
+# and `github.ref` are the caller's):
+#   - workflow_dispatch : cut the tag + GitHub release here, then package + publish inline.
+#   - release: published: the `release` job is SKIPPED; publish from the release tag.
+#
+# NO concurrency block here on purpose. The caller (publish.yml) owns it with a DISTINCT
+# literal group ("publish-<ref>"). The `check` job below reuses package-ci.yml, whose group is
+# "<caller workflow name>-<ref>" = "Release-<ref>"; if the caller used that same group it would
+# hold the slot while its own child waits for it -> deadlock, and the reusable workflow never
+# starts (0 jobs, run fails).
+on:
+  workflow_call:
+    inputs:
+      release_type:
+        description: Semver bump for this release (patch|minor|major|prerelease). Dispatch path only.
+        type: string
+        required: false
+      publish:
+        description: Run the npm publish job. Set false to publish from a local job in the caller.
+        type: boolean
+        required: false
+        default: true
+      runs_on:
+        description: Runner label for every job.
+        type: string
+        required: false
+        default: ubuntu-latest
+      bun_version:
+        description: Bun version passed to setup-bun ("latest", or a pin like "1.3.8").
+        type: string
+        required: false
+        default: latest
+      node_version:
+        description: Node version for the credentialed publish job. Node 24 bundles npm >= 11.5.1.
+        type: string
+        required: false
+        default: "24"
+      artifact_name:
+        description: Name of the uploaded tarball artifact (also exposed as an output).
+        type: string
+        required: false
+        default: npm-package
+      validate:
+        description: Run `bun run validate` in the check + package jobs.
+        type: boolean
+        required: false
+        default: true
+    outputs:
+      tag:
+        description: The tag cut by the release job (empty on the release:published path).
+        value: ${{ jobs.release.outputs.tag }}
+      version:
+        description: The version cut by the release job (empty on the release:published path).
+        value: ${{ jobs.release.outputs.version }}
+      prev_tag:
+        description: The previous v* tag, i.e. the changelog base.
+        value: ${{ jobs.release.outputs.prev_tag }}
+      artifact_name:
+        description: Artifact holding the packed tarball — consume it from a local publish job.
+        value: ${{ jobs.package.outputs.artifact_name }}
+
+permissions:
+  contents: read # least privilege at the top; elevate ONLY per job below.
+  # A called workflow can never elevate beyond what the caller granted: the caller's job must
+  # carry `permissions: { contents: write, id-token: write }` or release/publish fail.
+
+jobs:
+  # 1. Reuse the IDENTICAL checks from package-ci.yml. The relative "./" form resolves
+  #    against THIS repo at THIS ref, so a caller pinned to @v1 gets v1's checks.
+  check:
+    uses: ./.github/workflows/package-ci.yml
+    with:
+      runs_on: ${{ inputs.runs_on }}
+      bun_version: ${{ inputs.bun_version }}
+      validate: ${{ inputs.validate }}
+
+  # 2. Cut a tag-only release. Dispatch-on-main path only. NEVER writes refs/heads/main.
+  release:
+    needs: check
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ${{ inputs.runs_on }}
+    permissions:
+      contents: write # ONLY this job pushes a tag + creates a release
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+      version: ${{ steps.bump.outputs.version }}
+      prev_tag: ${{ steps.bump.outputs.prev_tag }}
+    env:
+      RELEASE_TYPE: ${{ inputs.release_type }} # untrusted input -> env, never inline in run
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          fetch-depth: 0 # need tags to derive the next version
+          # persist-credentials defaults true here so the local tag push is authenticated.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ inputs.bun_version }}
+      - name: Require a release_type on the dispatch path
+        # The caller's workflow_dispatch input is a `choice` and cannot be typed through
+        # workflow_call, so it arrives as a free string. Fail closed on an empty one rather
+        # than letting `npm version ""` produce something surprising.
+        run: |
+          set -euo pipefail
+          case "$RELEASE_TYPE" in
+            patch|minor|major|prerelease) ;;
+            *) echo "release_type must be patch|minor|major|prerelease (got '$RELEASE_TYPE')"; exit 1 ;;
+          esac
+      - name: Derive next version from the latest git tag
+        id: bump
+        run: |
+          set -euo pipefail
+          # package.json on a protected branch goes stale; the latest tag is the truth.
+          # versionsort.suffix='-' ranks prerelease tags (e.g. v1.2.3-rc.0) BELOW their release.
+          # Without it, a stray prerelease tag sorts highest and becomes the base — and a prerelease
+          # base makes `npm version patch|minor|major` FINALIZE (e.g. 0.1.2-rc.0 -> 0.1.2) instead of
+          # incrementing, so the job then tries to re-create an existing tag and dies. A higher-base
+          # prerelease still outranks a lower stable, so rc-to-rc chaining (prerelease bumps) still works.
+          prev="$(git -c versionsort.suffix='-' tag --list 'v*' --sort=-v:refname | head -1)" # latest release tag, or "" on the first release
+          base="${prev#v}"
+          base="${base:-0.0.0}"
+          # Set package.json to the base, then bump — no git tag, no push from npm.
+          npm version "$base" --no-git-tag-version --allow-same-version >/dev/null
+          new="$(npm version "$RELEASE_TYPE" --no-git-tag-version --preid rc)"
+          new="${new#v}"
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+          echo "tag=v$new" >> "$GITHUB_OUTPUT"
+          echo "prev_tag=$prev" >> "$GITHUB_OUTPUT" # explicit changelog base for --notes-start-tag
+      - name: Commit the bump locally and push the TAG ONLY
+        env:
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git commit -m "release: $TAG"
+          git tag "$TAG"
+          # refs/tags/* is NOT covered by a branch ruleset; refs/heads/main is never written.
+          git push origin "refs/tags/$TAG"
+      - name: Create the GitHub release with native notes
+        env:
+          TAG: ${{ steps.bump.outputs.tag }}
+          PREV_TAG: ${{ steps.bump.outputs.prev_tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Native notes — never hand-roll from `git log | grep | sed` (processes
+          # attacker-influenceable commit text). --verify-tag fails closed if the tag is missing.
+          # A release created with the default GITHUB_TOKEN does NOT re-fire release:published,
+          # so the publish job below runs inline in this same run for the dispatch path.
+          # Changelog base: pass the previous tag EXPLICITLY. The tag-only model tags each version
+          # on a separate bump commit that is NOT an ancestor of the next, so GitHub's auto
+          # base-detection fails and lists the FULL history (cumulative notes). --notes-start-tag
+          # forces a correct delta; omit it on the first release (no previous tag).
+          notes=(--generate-notes)
+          if [ -n "$PREV_TAG" ]; then
+            notes+=(--notes-start-tag "$PREV_TAG")
+          fi
+          # A prerelease tag (contains '-', e.g. v1.2.3-rc.0) must be flagged --prerelease so
+          # GitHub does not surface an rc as the repo's "Latest release"; stable tags get --latest.
+          case "$TAG" in
+            *-*) gh release create "$TAG" "${notes[@]}" --verify-tag --title "$TAG" --prerelease --latest=false ;;
+            *)   gh release create "$TAG" "${notes[@]}" --verify-tag --title "$TAG" --latest ;;
+          esac
+
+  # 3. Build + package the tarball WITHOUT the publish token in scope.
+  package:
+    needs: [check, release]
+    # Run on dispatch (after release) OR on a UI-published release. The release job is
+    # skipped on the release-published path, so gate on success-or-skipped, not success.
+    if: |
+      always() &&
+      needs.check.result == 'success' &&
+      (needs.release.result == 'success' || needs.release.result == 'skipped')
+    runs-on: ${{ inputs.runs_on }}
+    permissions:
+      contents: read # NO id-token here: postinstall scripts never see the OIDC token
+    outputs:
+      artifact_name: ${{ inputs.artifact_name }}
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && needs.release.outputs.tag || github.ref }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ inputs.bun_version }}
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - if: inputs.validate
+        run: bun run validate
+      - name: Pack the publishable tarball
+        # `npm pack --pack-destination` does NOT create the target dir (errors ENOENT on
+        # write), so create it first.
+        run: |
+          mkdir -p dist-pack
+          npm pack --pack-destination dist-pack
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: dist-pack/*.tgz
+          retention-days: 1
+
+  # 4. Minimal credentialed job: download the tarball and run ONLY npm publish.
+  #    Set `publish: false` to skip this and publish from a local job in the caller
+  #    (see examples/package/publish.local-publish.yml and README "Known risk").
+  publish:
+    needs: [release, package]
+    if: |
+      always() && inputs.publish && needs.package.result == 'success' &&
+      (
+        (github.event_name == 'workflow_dispatch' && needs.release.result == 'success') ||
+        github.event_name == 'release'
+      )
+    runs-on: ${{ inputs.runs_on }}
+    permissions:
+      id-token: write # ONLY this job — tokenless Trusted Publishing via OIDC
+      contents: read
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && needs.release.outputs.tag || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: ${{ inputs.node_version }}
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: dist-pack
+      - name: Assert npm floor for Trusted Publishing (fail closed)
+        run: |
+          set -euo pipefail
+          # Rely on the npm bundled with Node 24 — do NOT `npm install -g npm@latest`
+          # (a floating dep next to the publish token). Assert the floor instead.
+          have="$(npm --version)"
+          need="11.5.1"
+          [ "$(printf '%s\n%s\n' "$need" "$have" | sort -V | head -1)" = "$need" ] \
+            || { echo "npm $have < $need (Trusted Publishing floor)"; exit 1; }
+      - name: Verify the ref matches package.json, then publish
+        env:
+          EVENT: ${{ github.event_name }}
+          DISPATCH_VERSION: ${{ needs.release.outputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            want="$DISPATCH_VERSION"
+          else
+            want="${REF_NAME#v}" # release tag, e.g. v1.2.3
+          fi
+          # Fail closed on mismatch AND on an empty ref (a skipped release job falling through).
+          [ -n "$want" ] || { echo "empty version/ref — refusing to publish"; exit 1; }
+          [ "$pkg" = "$want" ] || { echo "package.json $pkg != ref $want"; exit 1; }
+          # Prereleases (a '-' in the version) go to dist-tag 'next' so they never clobber 'latest'.
+          case "$pkg" in *-*) tag=next ;; *) tag=latest ;; esac
+          # Trusted Publishing: tokenless, provenance auto-attached. No NODE_AUTH_TOKEN needed.
+          # Leading "./" is REQUIRED: a bare "dist-pack/foo.tgz" is parsed by npm as a
+          # GitHub "owner/repo" spec (it tries `git ls-remote` and fails), not a local file.
+          npm publish ./dist-pack/*.tgz --tag "$tag" --access public
