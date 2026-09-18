@@ -1,0 +1,41 @@
+name: Self Test
+
+# This repo ships YAML that seven other repos execute, so the only thing to test is that the
+# YAML is valid and actionlint-clean. actionlint is installed from its signed release tarball
+# with a pinned version + sha256 — no third-party action, nothing to SHA-pin here.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    env:
+      ACTIONLINT_VERSION: 1.7.12
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8 # linux_amd64
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+      - name: Install actionlint (pinned + checksum-verified)
+        run: |
+          set -euo pipefail
+          file="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${file}"
+          curl -fsSL -o "$file" "$url"
+          echo "${ACTIONLINT_SHA256}  ${file}" | sha256sum -c -
+          tar xzf "$file" actionlint
+      - name: Lint the reusable workflows
+        run: ./actionlint -color .github/workflows/*.yml
+      - name: Lint the example caller files
+        # The examples are real workflows for a consuming repo; actionlint cannot resolve the
+        # cross-repo `uses:` but it still checks syntax, expressions and shell.
+        run: ./actionlint -color -shellcheck= examples/*/*.yml
