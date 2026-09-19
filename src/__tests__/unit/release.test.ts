@@ -49,6 +49,24 @@ const RELEASABLE: Record<string, StubReply> = {
   "gh run list": JSON.stringify([{ databaseId: 77 }])
 };
 
+/** A stub whose newest run moves from `before` to the reply's run once the workflow is dispatched. */
+const dispatching = (replies: Record<string, StubReply>, before: string): StubExecutor => {
+  const base = stubExecutor(replies);
+
+  return {
+    ...base,
+    async capture(command, args, options) {
+      const line = [command, ...args].join(" ");
+      const dispatched = base.captured.some(entry => entry.startsWith("gh workflow run"));
+      if (!line.startsWith("gh run list") || dispatched)
+        return base.capture(command, args, options);
+
+      base.captured.push(line);
+      return { code: 0, stdout: before, stderr: "" };
+    }
+  };
+};
+
 const harness = (
   replies: Record<string, StubReply> = RELEASABLE
 ): {
@@ -57,7 +75,7 @@ const harness = (
   lines: string[];
   ui: ReturnType<typeof createBrandConsole>;
 } => {
-  const exec = stubExecutor(replies);
+  const exec = dispatching(replies, JSON.stringify([{ databaseId: 76 }]));
   const tree = Object.fromEntries(
     workflowTemplates.map(template => [template.path, template.content])
   );
@@ -80,7 +98,7 @@ const instantly = async (): Promise<void> => undefined;
 
 /** A stub whose dist-tag reply moves to `after` once the workflow has been dispatched. */
 const movingRegistry = (after: string): StubExecutor => {
-  const base = stubExecutor(RELEASABLE);
+  const base = dispatching(RELEASABLE, JSON.stringify([{ databaseId: 76 }]));
 
   return {
     ...base,
@@ -206,6 +224,52 @@ describe("runRelease — dispatch and verification", () => {
 
     expect(code).toBe(1);
     expect(test.lines.join("\n")).toContain("did not move");
+  });
+
+  it("never watches the run of the release before, even when GitHub still lists it first", async () => {
+    // The first live release watched a stale, failed run: the list was read before the new run existed.
+    const stale = JSON.stringify([{ databaseId: 76 }]);
+    const base = movingRegistry("1.2.4");
+    let lookupsAfterDispatch = 0;
+    const exec: StubExecutor = {
+      ...base,
+      async capture(command, args, options) {
+        const line = [command, ...args].join(" ");
+        const dispatched = base.captured.some(entry => entry.startsWith("gh workflow run"));
+        if (line.startsWith("gh run list") && dispatched) {
+          lookupsAfterDispatch += 1;
+          if (lookupsAfterDispatch <= 2) return { code: 0, stdout: stale, stderr: "" };
+        }
+
+        return base.capture(command, args, options);
+      }
+    };
+    const test = harness();
+
+    const code = await runRelease({
+      ctx: { ...test.ctx, exec },
+      ui: test.ui,
+      releaseType: "patch",
+      sleep: instantly
+    });
+
+    expect(code).toBe(0);
+    expect(exec.inherited).toEqual(["gh run watch 77 --exit-status"]);
+  });
+
+  it("fails when only the run of the release before is ever listed", async () => {
+    const test = harness({ ...RELEASABLE, "gh run list": JSON.stringify([{ databaseId: 76 }]) });
+
+    const code = await runRelease({
+      ctx: test.ctx,
+      ui: test.ui,
+      releaseType: "patch",
+      sleep: instantly
+    });
+
+    expect(code).toBe(1);
+    expect(test.exec.inherited).toEqual([]);
+    expect(test.lines.join("\n")).toContain("never appeared");
   });
 
   it("fails when the dispatched run never appears", async () => {

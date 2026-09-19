@@ -43,9 +43,9 @@ registers the trusted publisher and applies the branch ruleset. Run it again any
 only does what is still missing.
 
 > [!NOTE]
-> **Status: `1.x`, early.** `package-ci.yml` runs on this repo's own PRs. `package-release.yml`
-> and the CLI's `setup` and `release` have passed dry-run and unit tests only; they have not
-> yet released a live package.
+> **Status: `1.x`, early.** `package-ci.yml`, `package-release.yml` and `moku-release release`
+> ship this package itself: `1.1.1` was the first live release, tokenless and with provenance.
+> `moku-release setup` has passed dry-run and unit tests only.
 
 > [!IMPORTANT]
 > Two steps are yours alone. The CLI never handles a credential, and there is no `NPM_TOKEN`
@@ -152,14 +152,26 @@ YAML stays the same for everyone.
 | `@v1.x.y` | Immutable tag on every change. Pin it to freeze a project. |
 | `@v2` | Any breaking change: a removed input, a changed default, a renamed job. `v1` stays where it was. |
 
+> [!IMPORTANT]
+> `v1` must be a **lightweight** tag. `package-release.yml` calls `./.github/workflows/package-ci.yml`
+> from inside itself, and GitHub cannot resolve that relative call through an annotated tag: every
+> release dies with `startup_failure` and "workflow was not found". Immutable `v1.x.y` tags may be
+> annotated.
+>
+> ```sh
+> git tag -a v1.2.0 -m "v1.2.0"
+> git tag -f v1 v1.2.0^{commit}      # no -a, no -m
+> git push origin v1.2.0 && git push -f origin v1
+> ```
+
 A change here runs in every moku repo with `contents: write` and `id-token: write`. Review it
 like release engineering, not like config.
 
 ## When a release fails
 
-One risk is still open: npm may reject a publish that runs inside a workflow owned by another
-repository. It is unverified until the first live release. The fallback and sixteen other
-traps the workflows already handle are in [docs/release-notes.md](docs/release-notes.md).
+The cross-repo OIDC publish was the open risk; npm accepted it on the first live release
+(`@moku-labs/ci@1.1.1`). The fallback, should npm ever change that, and sixteen traps the
+workflows already handle are in [docs/release-notes.md](docs/release-notes.md).
 
 ## Scripts
 
