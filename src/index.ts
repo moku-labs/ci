@@ -7,7 +7,7 @@
  * every decision worth testing lives in a command, a check, or a pure lib function, none
  * of which know that a process exists.
  */
-import { createBrandConsole, createBrandPrompts } from "@moku-labs/common/cli";
+import { type BrandPrompts, createBrandConsole, createBrandPrompts } from "@moku-labs/common/cli";
 import { runDoctor } from "./commands/doctor";
 import { runRelease } from "./commands/release";
 import { runSetup } from "./commands/setup";
@@ -22,12 +22,33 @@ const USAGE = [
   "  moku-release doctor [--json]    read-only diagnosis of the release setup",
   `  moku-release <${RELEASE_TYPES.join("|")}>`,
   "",
-  "  --dry-run                       print every action, mutate nothing",
+  "  --dry-run                       print every action, mutate nothing, ask nothing",
+  "  --yes, -y                       answer every setup confirmation with yes",
   "",
   "  Two steps are yours alone — this CLI never handles a credential:",
   "    gh auth login",
   "    npm login"
 ].join("\n");
+
+/** Prompts that never read stdin: every confirmation is a yes, every menu its first entry. */
+const ASSENTING_PROMPTS: BrandPrompts = {
+  /**
+   * Answer a confirmation with yes.
+   *
+   * @returns Always `true`.
+   * @example
+   * await ASSENTING_PROMPTS.confirm("Replace ci.yml?"); // true
+   */
+  confirm: async () => true,
+  /**
+   * Pick the first entry of a menu.
+   *
+   * @returns Always `0`.
+   * @example
+   * await ASSENTING_PROMPTS.select("Bump?", ["patch", "minor"]); // 0
+   */
+  select: async () => 0
+};
 
 /**
  * Dispatch a parsed invocation to its command.
@@ -51,7 +72,10 @@ async function dispatch(
   }
 
   if (parsed.command === "setup") {
-    return runSetup({ ctx, ui, prompts: createBrandPrompts(), dryRun: parsed.dryRun });
+    // A dry run mutates nothing, so it has nothing to ask; `--yes` is for agents and CI,
+    // where there is no TTY to answer on.
+    const prompts = parsed.yes || parsed.dryRun ? ASSENTING_PROMPTS : createBrandPrompts();
+    return runSetup({ ctx, ui, prompts, dryRun: parsed.dryRun });
   }
 
   if (parsed.command === "release" && parsed.releaseType !== undefined) {

@@ -3,12 +3,15 @@
  * dispatcher.
  *
  * The grammar is deliberately tiny: one positional (a command name, or a semver bump that
- * implies the `release` command) plus three flags. Anything unrecognized resolves to
+ * implies the `release` command) plus four flags. Anything unrecognized resolves to
  * `help` with an `error` set — the CLI never guesses what an operator meant.
  */
 
 /** The semver bumps `moku-release <type>` accepts, in menu order. */
 export const RELEASE_TYPES = ["patch", "minor", "major", "prerelease"] as const;
+
+/** Every flag the CLI accepts, besides `--help`. */
+const KNOWN_FLAGS: ReadonlySet<string> = new Set(["--json", "--dry-run", "--yes", "-y"]);
 
 /**
  * A semver bump the release workflow understands.
@@ -31,7 +34,7 @@ export type CommandName = "doctor" | "setup" | "release" | "help";
  * prints usage and exits non-zero.
  *
  * @example
- * const parsed: ParsedArgv = { command: "release", releaseType: "patch", json: false, dryRun: false };
+ * const parsed: ParsedArgv = { command: "release", releaseType: "patch", json: false, dryRun: false, yes: false };
  */
 export type ParsedArgv = {
   /** The command to run. */
@@ -42,6 +45,8 @@ export type ParsedArgv = {
   json: boolean;
   /** Whether `--dry-run` was requested (no mutation is performed). */
   dryRun: boolean;
+  /** Whether `--yes` was requested: every confirmation is answered yes, for agents and CI. */
+  yes: boolean;
   /** Why the invocation was rejected, when it was. */
   error?: string;
 };
@@ -67,7 +72,7 @@ function isReleaseType(value: string): value is ReleaseType {
  * rejected("unknown flag `--force`");
  */
 function rejected(error: string): ParsedArgv {
-  return { command: "help", json: false, dryRun: false, error };
+  return { command: "help", json: false, dryRun: false, yes: false, error };
 }
 
 /**
@@ -77,7 +82,7 @@ function rejected(error: string): ParsedArgv {
  * @returns What to run, and with which flags.
  * @example
  * parseArgv(["patch", "--dry-run"]);
- * // { command: "release", releaseType: "patch", json: false, dryRun: true }
+ * // { command: "release", releaseType: "patch", json: false, dryRun: true, yes: false }
  */
 export function parseArgv(argv: readonly string[]): ParsedArgv {
   const flags = argv.filter(argument => argument.startsWith("-"));
@@ -85,24 +90,25 @@ export function parseArgv(argv: readonly string[]): ParsedArgv {
 
   // Help wins over everything: `--help` must never be read as a rejected invocation.
   if (flags.includes("--help") || flags.includes("-h")) {
-    return { command: "help", json: false, dryRun: false };
+    return { command: "help", json: false, dryRun: false, yes: false };
   }
 
   // Flags are an exact allowlist — a typo must not silently become a no-op.
-  const unknownFlag = flags.find(flag => flag !== "--json" && flag !== "--dry-run");
+  const unknownFlag = flags.find(flag => !KNOWN_FLAGS.has(flag));
   if (unknownFlag) return rejected(`unknown flag \`${unknownFlag}\``);
   if (positionals.length > 1) return rejected(`unexpected argument \`${positionals[1]}\``);
 
   const json = flags.includes("--json");
   const dryRun = flags.includes("--dry-run");
+  const yes = flags.includes("--yes") || flags.includes("-y");
 
   // No positional: print usage, successfully — `bun run release` with no bump lands here.
   const [first] = positionals;
-  if (first === undefined) return { command: "help", json, dryRun };
+  if (first === undefined) return { command: "help", json, dryRun, yes };
 
-  if (first === "doctor" || first === "setup") return { command: first, json, dryRun };
-  if (first === "help") return { command: "help", json, dryRun };
-  if (isReleaseType(first)) return { command: "release", releaseType: first, json, dryRun };
+  if (first === "doctor" || first === "setup") return { command: first, json, dryRun, yes };
+  if (first === "help") return { command: "help", json, dryRun, yes };
+  if (isReleaseType(first)) return { command: "release", releaseType: first, json, dryRun, yes };
 
   return rejected(`unknown command \`${first}\``);
 }

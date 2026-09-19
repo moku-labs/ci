@@ -3,7 +3,7 @@ import { parseArgv, RELEASE_TYPES } from "../../lib/argv";
 
 describe("parseArgv", () => {
   it("treats a bare invocation as help, without an error", () => {
-    expect(parseArgv([])).toEqual({ command: "help", json: false, dryRun: false });
+    expect(parseArgv([])).toEqual({ command: "help", json: false, dryRun: false, yes: false });
   });
 
   it("parses the two named commands", () => {
@@ -17,8 +17,15 @@ describe("parseArgv", () => {
       command: "release",
       releaseType: type,
       json: false,
-      dryRun: false
+      dryRun: false,
+      yes: false
     });
+  });
+
+  it("parses --yes and -y, for agents and CI with no TTY", () => {
+    expect(parseArgv(["setup", "--yes"]).yes).toBe(true);
+    expect(parseArgv(["setup", "-y"]).yes).toBe(true);
+    expect(parseArgv(["setup"]).yes).toBe(false);
   });
 
   it("parses the flags in any position", () => {
@@ -31,7 +38,12 @@ describe("parseArgv", () => {
   });
 
   it("treats --help and -h as the help command, never as an unknown flag", () => {
-    expect(parseArgv(["--help"])).toEqual({ command: "help", json: false, dryRun: false });
+    expect(parseArgv(["--help"])).toEqual({
+      command: "help",
+      json: false,
+      dryRun: false,
+      yes: false
+    });
     expect(parseArgv(["doctor", "-h"]).command).toBe("help");
   });
 
