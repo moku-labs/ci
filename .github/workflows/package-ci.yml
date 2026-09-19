@@ -35,6 +35,14 @@ on:
         type: boolean
         required: false
         default: true
+      extra:
+        description: >-
+          JSON array of extra package.json scripts, one job each, run after a build:
+          '["check:bundle", "test:cli-e2e"]'. For project checks the five contract scripts do
+          not cover.
+        type: string
+        required: false
+        default: "[]"
 
 # Scope the group by github.workflow: a release's reuse of CI runs under the "Release"
 # workflow name, so it never shares a group with — and never cancels — a standalone CI run.
@@ -97,13 +105,45 @@ jobs:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
           persist-credentials: false
+          fetch-depth: 0 # tags: a package.json with no `version` is seeded from the latest one
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ inputs.bun_version }}
       - run: bun install --frozen-lockfile
       - run: bun run build # tsdown — index + cli entries
+      - name: Seed the version from the latest tag when package.json has none
+        # Some packages keep the version in git tags only. publint and pkg.pr.new pack a
+        # tarball, and a tarball needs a version. Never committed, never published.
+        run: |
+          set -euo pipefail
+          if [ -n "$(bun -e 'console.log(require("./package.json").version ?? "")')" ]; then exit 0; fi
+          latest="$(git tag --list 'v*' --sort=-v:refname | head -n1)"
+          latest="${latest#v}"
+          npm version "${latest:-0.0.0}" --no-git-tag-version --allow-same-version >/dev/null
       - if: inputs.validate
         run: bun run validate # publint + attw (node16 profile)
+
+  # Project-specific checks, one job per script: `ci / extra (check:bundle)`. Each runs after
+  # its own build, because such a check usually reads dist/. The release path runs them too.
+  extra:
+    if: inputs.extra != '[]'
+    runs-on: ${{ inputs.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        script: ${{ fromJSON(inputs.extra) }}
+    env:
+      SCRIPT: ${{ matrix.script }} # caller input -> env, never inline in run
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ inputs.bun_version }}
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun run "$SCRIPT"
 
   # Preview of the PR's package on pkg.pr.new — nothing is published to npm, no token is in
   # scope. Needs the pkg.pr.new GitHub App on the repo. NOT a required check (rulesets/main.json).
@@ -117,10 +157,18 @@ jobs:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
           persist-credentials: false
+          fetch-depth: 0 # tags, for the version seed below
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ inputs.bun_version }}
       - run: bun install --frozen-lockfile
       - run: bun run build
+      - name: Seed the version from the latest tag when package.json has none
+        run: |
+          set -euo pipefail
+          if [ -n "$(bun -e 'console.log(require("./package.json").version ?? "")')" ]; then exit 0; fi
+          latest="$(git tag --list 'v*' --sort=-v:refname | head -n1)"
+          latest="${latest#v}"
+          npm version "${latest:-0.0.0}" --no-git-tag-version --allow-same-version >/dev/null
       # Pinned: a floating bunx would run new third-party code in every moku repo.
       - run: bunx pkg-pr-new@0.0.88 publish --comment=update --packageManager=bun

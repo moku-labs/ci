@@ -22,6 +22,7 @@ everything else lives here, once. Not a build tool and not a framework — it ca
 [Install](#install) ·
 [How it works](#how-it-works) ·
 [Workflows](#workflows) ·
+[Project checks](#project-checks) ·
 [PR previews](#pr-previews) ·
 [CLI](#cli) ·
 [The contract](#the-contract) ·
@@ -94,8 +95,8 @@ flowchart LR
 
 | Workflow | Called from | Jobs | Inputs (all optional) |
 |---|---|---|---|
-| [`package-ci.yml`](.github/workflows/package-ci.yml) | [`examples/package/ci.yml`](examples/package/ci.yml) | `lint` · `types` · `test` · `build` · `preview` | `runs_on`, `bun_version`, `validate`, `preview` |
-| [`package-release.yml`](.github/workflows/package-release.yml) | [`examples/package/publish.yml`](examples/package/publish.yml) | `check` → `release` → `package` → `publish` | `release_type`, `publish`, `runs_on`, `bun_version`, `node_version`, `artifact_name`, `validate` |
+| [`package-ci.yml`](.github/workflows/package-ci.yml) | [`examples/package/ci.yml`](examples/package/ci.yml) | `lint` · `types` · `test` · `build` · `extra` · `preview` | `runs_on`, `bun_version`, `validate`, `preview`, `extra` |
+| [`package-release.yml`](.github/workflows/package-release.yml) | [`examples/package/publish.yml`](examples/package/publish.yml) | `check` → `release` → `package` → `publish` | `release_type`, `publish`, `runs_on`, `bun_version`, `node_version`, `artifact_name`, `validate`, `extra` |
 | [`app-deploy.yml`](.github/workflows/app-deploy.yml) | [`examples/app/ci.yml`](examples/app/ci.yml) | `validate` → `deploy` to Cloudflare | script names (`lint_script`, `build_script`, `deploy_script`, …) and two required secrets |
 | [`self-test.yml`](.github/workflows/self-test.yml) | this repo only | `actionlint` over workflows and examples | — |
 
@@ -109,6 +110,30 @@ flowchart LR
 > [!TIP]
 > A Layer-3 app copies `examples/app/ci.yml` by hand and needs a `deploy` script. The CLI
 > sets up packages only.
+
+## Project checks
+
+A check the five contract scripts do not cover goes in `extra`: a JSON array of script names.
+Each one is its own job, run after a build, and reported as `ci / extra (check:bundle)`.
+
+```yaml
+# .github/workflows/ci.yml
+jobs:
+  ci:
+    uses: moku-labs/ci/.github/workflows/package-ci.yml@v1
+    with:
+      extra: '["check:bundle", "test:cli-e2e"]'
+```
+
+| Rule | Where |
+|---|---|
+| Give `publish.yml` the same `extra`, so a release waits for the same checks. | caller `publish.yml` |
+| `setup` never replaces a thin caller that differs from the template. | `moku-release setup` |
+| An `extra` job is not a required check until the ruleset of that repo names it. | repo ruleset |
+| A check that needs its own matrix or a cron stays a separate workflow file. `doctor` and `setup` only look at `ci.yml` and `publish.yml`. | the project |
+
+A package may keep its version in git tags only. `build` and `preview` then seed
+`package.json` from the latest `v*` tag before they pack. Nothing is committed.
 
 ## PR previews
 
