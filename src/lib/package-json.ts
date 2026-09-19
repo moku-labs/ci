@@ -107,16 +107,40 @@ export async function readManifest(files: FileStore): Promise<PackageManifest | 
   return parseManifest(await files.read(MANIFEST_PATH));
 }
 
+/** Any character outside printable ASCII and the JSON whitespace. */
+const NON_ASCII = /[^\t\n\r -~]/;
+
+/**
+ * Whether a text holds only ASCII characters, i.e. every other character is `\uXXXX`-escaped.
+ *
+ * @param text - The file contents to test.
+ * @returns `true` when no raw non-ASCII character is present.
+ * @example
+ * isAsciiOnly('{"description":"a \\u2014 b"}'); // true
+ */
+function isAsciiOnly(text: string): boolean {
+  return !NON_ASCII.test(text);
+}
+
 /**
  * Render a manifest the way npm itself writes one: two-space JSON with a trailing newline.
+ * A source file that was ASCII-only stays ASCII-only, so an escaped dash the package chose
+ * does not show up as a changed line in the diff.
  *
  * @param manifest - The manifest to serialize.
+ * @param source - The file contents the manifest was read from, when there were any.
  * @returns The file contents to write.
  * @example
- * await files.write("package.json", formatManifest(manifest));
+ * await files.write("package.json", formatManifest(manifest, source));
  */
-export function formatManifest(manifest: PackageManifest): string {
-  return `${JSON.stringify(manifest, undefined, 2)}\n`;
+export function formatManifest(manifest: PackageManifest, source?: string): string {
+  const text = `${JSON.stringify(manifest, undefined, 2)}\n`;
+  if (source === undefined || !isAsciiOnly(source)) return text;
+
+  return text.replaceAll(
+    new RegExp(NON_ASCII, "g"),
+    character => String.raw`\u${character.codePointAt(0)?.toString(16).padStart(4, "0")}`
+  );
 }
 
 /**

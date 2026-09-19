@@ -10,7 +10,7 @@
 import type { BrandConsole, BrandPrompts } from "@moku-labs/common/cli";
 import { branchRulesetCheck, ghAuthCheck, npmAuthCheck, trustedPublisherCheck } from "../checks";
 import { findStaleRuleset } from "../checks/branch-ruleset";
-import { ownerRepoFrom } from "../lib/git";
+import { LATEST_TAG_ARGS, latestVersionTag, ownerRepoFrom } from "../lib/git";
 import { withCentralRequiredChecks } from "../lib/github";
 import {
   formatManifest,
@@ -89,9 +89,60 @@ async function ensurePrerequisites(setup: SetupRun): Promise<boolean> {
 }
 
 /**
+ * Whether git already holds this exact file: tracked, and with no uncommitted change.
+ *
+ * @param setup - The wizard state.
+ * @param path - Repo-relative path of the file.
+ * @returns `true` when `git checkout -- <path>` would bring the current content back.
+ * @example
+ * await isCommittedUnchanged(setup, ".github/workflows/ci.yml");
+ */
+async function isCommittedUnchanged(setup: SetupRun, path: string): Promise<boolean> {
+  const tracked = await setup.ctx.exec.capture("git", ["ls-files", "--error-unmatch", path]);
+  if (tracked.code !== 0) return false;
+
+  const status = await setup.ctx.exec.capture("git", ["status", "--porcelain", "--", path]);
+  return status.code === 0 && status.stdout.trim() === "";
+}
+
+/**
+ * Ask before replacing an existing workflow, and keep the original: in git when it is
+ * committed and unmodified, in a `.bak` copy otherwise.
+ *
+ * @param setup - The wizard state.
+ * @param template - The central workflow about to be written.
+ * @param existing - The current contents of the file.
+ * @returns `true` when the caller may write the template now.
+ * @example
+ * if (!(await clearExistingWorkflow(setup, template, existing))) continue;
+ */
+async function clearExistingWorkflow(
+  setup: SetupRun,
+  template: (typeof workflowTemplates)[number],
+  existing: string
+): Promise<boolean> {
+  const kind = isThinWorkflow(existing, template) ? "differs" : "is a legacy workflow";
+
+  // A committed, unmodified file is already kept by git: a `.bak` would only litter the tree
+  const committed = await isCommittedUnchanged(setup, template.path);
+  const safety = committed ? "git keeps the original" : "a .bak copy is kept";
+
+  if (!(await setup.prompts.confirm(`${template.path} ${kind}. Replace it (${safety})?`))) {
+    setup.ui.check(false, `${template.path} left unchanged`);
+    return false;
+  }
+  if (deferred(setup, `${committed ? "replace" : "back up and replace"} ${template.path}`)) {
+    return false;
+  }
+
+  if (!committed) await setup.ctx.files.backup(template.path);
+  return true;
+}
+
+/**
  * Write the two thin workflows. A file that already calls the pinned central workflow is
  * left alone; a differing file is only replaced after an explicit confirm, and a `.bak`
- * copy is kept.
+ * copy is kept unless git already holds the original.
  *
  * @param setup - The wizard state.
  * @returns Nothing.
@@ -110,19 +161,11 @@ async function writeWorkflows(setup: SetupRun): Promise<void> {
     }
 
     // An existing file is someone's work — never replace one without asking.
-    if (existing !== undefined) {
-      const kind = isThinWorkflow(existing, template) ? "differs" : "is a legacy workflow";
-      const approved = await setup.prompts.confirm(
-        `${template.path} ${kind}. Replace it (a .bak copy is kept)?`
-      );
-      if (!approved) {
-        setup.ui.check(false, `${template.path} left unchanged`);
-        continue;
-      }
-      if (deferred(setup, `back up and replace ${template.path}`)) continue;
-
-      await setup.ctx.files.backup(template.path);
-    } else if (deferred(setup, `write ${template.path}`)) continue;
+    const cleared =
+      existing === undefined
+        ? !deferred(setup, `write ${template.path}`)
+        : await clearExistingWorkflow(setup, template, existing);
+    if (!cleared) continue;
 
     await setup.ctx.files.write(template.path, template.content);
     setup.ui.check(true, `${template.path} written`);
@@ -158,7 +201,8 @@ async function normalizeContract(setup: SetupRun, manifest: PackageManifest): Pr
   }
   if (deferred(setup, `write ${MANIFEST_PATH}`)) return;
 
-  await setup.ctx.files.write(MANIFEST_PATH, formatManifest(next));
+  const source = await setup.ctx.files.read(MANIFEST_PATH);
+  await setup.ctx.files.write(MANIFEST_PATH, formatManifest(next, source));
   setup.ui.check(true, `${MANIFEST_PATH} normalized`);
 }
 
@@ -211,6 +255,15 @@ async function firstPublish(setup: SetupRun, name: string, version: string): Pro
  */
 async function pushVersionTag(setup: SetupRun, version: string): Promise<void> {
   setup.ui.heading("Tag");
+
+  // A released package keeps its version in tags; `package.json` on main goes stale there,
+  // so tagging its version would push a tag that was never a release
+  const listing = await setup.ctx.exec.capture("git", [...LATEST_TAG_ARGS]);
+  const latest = latestVersionTag(listing.stdout);
+  if (latest !== undefined) {
+    setup.ui.check(true, `release tags exist, latest is ${latest}`);
+    return;
+  }
 
   const tag = `v${version}`;
   const existing = await setup.ctx.exec.capture("git", ["tag", "--list", tag]);
