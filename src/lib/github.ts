@@ -120,13 +120,40 @@ export function requiredCheckContexts(stdout: string): string[] {
     .flatMap(check => (check.context === undefined ? [] : [check.context]));
 }
 
+/** Prefix GitHub puts on a reusable workflow's jobs: the caller's job id, `ci`. */
+const CALLER_PREFIX = "ci / ";
+
+/**
+ * What is wrong with a ruleset's required checks, measured against the central ones. A
+ * legacy check is a central one without the caller prefix (`lint` for `ci / lint`): the thin
+ * caller never reports it. Any other context is the project's own (`ci-pass` of a matrix
+ * workflow) and is none of our business.
+ *
+ * @param required - The contexts the ruleset requires.
+ * @param central - The central contexts (`ci / lint`, …).
+ * @returns The legacy contexts to drop and the central ones still missing.
+ * @example
+ * requiredChecksDrift(["lint", "ci-pass"], ["ci / lint"]); // { legacy: ["lint"], missing: ["ci / lint"] }
+ */
+export function requiredChecksDrift(
+  required: readonly string[],
+  central: readonly string[]
+): { legacy: string[]; missing: string[] } {
+  const bare = new Set(central.map(context => context.slice(CALLER_PREFIX.length)));
+
+  return {
+    legacy: required.filter(context => bare.has(context)),
+    missing: central.filter(context => !required.includes(context))
+  };
+}
+
 /**
  * The body that moves an existing ruleset onto the central required checks. Every other
- * rule of the existing ruleset is kept as it is.
+ * rule is kept as it is, and so is every required check the project added itself.
  *
  * @param existing - The full existing ruleset as JSON.
  * @param template - The central ruleset template as JSON.
- * @returns The `PUT` body: the existing rules with the template's required checks.
+ * @returns The `PUT` body: the existing rules with the central required checks merged in.
  * @example
  * const body = withCentralRequiredChecks(existingJson, renderMainRuleset());
  */
@@ -134,7 +161,25 @@ export function withCentralRequiredChecks(existing: string, template: string): s
   const kept = parseRules(existing).filter(rule => rule.type !== REQUIRED_CHECKS_RULE);
   const central = parseRules(template).filter(rule => rule.type === REQUIRED_CHECKS_RULE);
 
-  return JSON.stringify({ rules: [...kept, ...central] });
+  // The project's own checks ride along: everything required today that is not a legacy name
+  const centralContexts = requiredCheckContexts(template);
+  const { legacy } = requiredChecksDrift(requiredCheckContexts(existing), centralContexts);
+  const own = requiredCheckContexts(existing).filter(
+    context => !legacy.includes(context) && !centralContexts.includes(context)
+  );
+
+  const merged = central.map(rule => ({
+    ...rule,
+    parameters: {
+      ...rule.parameters,
+      required_status_checks: [
+        ...(rule.parameters?.required_status_checks ?? []),
+        ...own.map(context => ({ context }))
+      ]
+    }
+  }));
+
+  return JSON.stringify({ rules: [...kept, ...merged] });
 }
 
 /**
