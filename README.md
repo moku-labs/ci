@@ -13,7 +13,22 @@ same hard-won lessons fixed in one file and missing in another. Here they live o
 .github/workflows/self-test.yml        actionlint over everything in this repo
 examples/                              the thin caller files a project commits
 rulesets/main.json                     branch ruleset payload for `gh api`
+src/                                   the `moku-release` CLI, published as `@moku-labs/ci`
 ```
+
+## The `moku-release` CLI
+
+The same repository ships the CLI that installs these files into a project. It reads
+`examples/` and `rulesets/` from its own package, so a workflow and its template are one file.
+
+```bash
+bun add -d @moku-labs/ci
+bun run release:setup      # once per project
+bun run release:doctor     # any time, read-only
+bun run release patch      # each release
+```
+
+Details: [src/README.md](src/README.md).
 
 ## The project contract
 
