@@ -75,7 +75,7 @@ async function dispatch(
     // A dry run mutates nothing, so it has nothing to ask; `--yes` is for agents and CI,
     // where there is no TTY to answer on.
     const prompts = parsed.yes || parsed.dryRun ? ASSENTING_PROMPTS : createBrandPrompts();
-    return runSetup({ ctx, ui, prompts, dryRun: parsed.dryRun });
+    return runSetup({ ctx, ui, prompts, dryRun: parsed.dryRun, unattended: parsed.yes });
   }
 
   if (parsed.command === "release" && parsed.releaseType !== undefined) {
