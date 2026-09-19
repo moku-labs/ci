@@ -309,6 +309,20 @@ describe("runSetup — publish, tag, trust, ruleset", () => {
     );
   });
 
+  it("unattended: prints the OTP steps instead of running them, so --yes never hangs", async () => {
+    const test = harness({
+      ...AUTHENTICATED,
+      "npm trust list @moku-labs/common": { code: 1, stderr: "npm error code EOTP" }
+    });
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts, unattended: true });
+
+    expect(test.exec.inherited).not.toContain("npm publish --access public");
+    expect(test.exec.inherited.some(line => line.startsWith("npm trust github"))).toBe(false);
+    expect(test.lines.join("\n")).toContain("first publish needs your OTP");
+    expect(test.lines.join("\n")).toContain("trusted publisher registration needs your OTP");
+  });
+
   it("does not register behind 2FA when the answer is no", async () => {
     const test = harness(
       {

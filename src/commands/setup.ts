@@ -41,6 +41,8 @@ export type SetupOptions = {
   prompts: BrandPrompts;
   /** Print actions without performing any mutation. */
   dryRun?: boolean;
+  /** Nobody is at the keyboard (`--yes`): a step that needs the owner's OTP is printed, not run. */
+  unattended?: boolean;
 };
 
 /** The wizard's resolved state, threaded through every step. */
@@ -60,6 +62,24 @@ function deferred(setup: SetupRun, description: string): boolean {
   if (!setup.dryRun) return false;
 
   setup.ui.info(`would ${description}`);
+  return true;
+}
+
+/**
+ * Hand a step that needs the owner's OTP back to the owner. npm asks for the OTP in a
+ * browser; with nobody at the keyboard (`--yes`) that would hang, so the command is printed.
+ *
+ * @param setup - The wizard state.
+ * @param step - What the step does, as a noun phrase ("first publish").
+ * @param command - The command the owner runs themselves.
+ * @returns `true` when the run is unattended and the caller must not act.
+ * @example
+ * if (needsOwner(setup, "first publish", "npm publish --access public")) return false;
+ */
+function needsOwner(setup: SetupRun, step: string, command: string): boolean {
+  if (!setup.unattended) return false;
+
+  setup.ui.check(false, `${step} needs your OTP, run it yourself`, command);
   return true;
 }
 
@@ -232,6 +252,9 @@ async function firstPublish(setup: SetupRun, name: string, version: string): Pro
     return false;
   }
   if (deferred(setup, `run bun run build && npm publish --access public`)) return false;
+  if (needsOwner(setup, "first publish", "bun run build && npm publish --access public")) {
+    return false;
+  }
 
   const built = await setup.ctx.exec.inherit("bun", ["run", "build"]);
   if (built !== 0) {
@@ -305,6 +328,7 @@ async function registerTrustedPublisher(setup: SetupRun): Promise<void> {
     return;
   }
   if (deferred(setup, registration)) return;
+  if (needsOwner(setup, "trusted publisher registration", registration)) return;
 
   const [command = "npm", ...args] = registration.split(" ");
   const code = await setup.ctx.exec.inherit(command, args);
@@ -405,7 +429,7 @@ async function applyBranchRuleset(setup: SetupRun, ownerRepo: string): Promise<v
  * const code = await runSetup({ ctx, ui, prompts });
  */
 export async function runSetup(options: SetupOptions): Promise<number> {
-  const setup: SetupRun = { dryRun: false, ...options };
+  const setup: SetupRun = { dryRun: false, unattended: false, ...options };
   const { ui } = setup;
 
   ui.lockup({ wordmark: "moku release", label: setup.dryRun ? "setup · dry-run" : "setup" });
