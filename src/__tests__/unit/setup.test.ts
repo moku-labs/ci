@@ -245,7 +245,7 @@ describe("runSetup — publish, tag, trust, ruleset", () => {
     await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
 
     expect(test.exec.inherited).toContain(
-      "npm trust github @moku-labs/common --file publish.yml --repo moku-labs/common --yes"
+      "npm trust github @moku-labs/common --file publish.yml --repo moku-labs/common --allow-publish --yes"
     );
   });
 

@@ -39,6 +39,19 @@ function isUnauthorized(output: string): boolean {
 }
 
 /**
+ * Whether npm refused the listing because the account needs a one-time password. Output is
+ * captured here, so npm cannot prompt: the answer is unknown, not "missing".
+ *
+ * @param output - The combined stdout/stderr npm produced.
+ * @returns `true` when npm asked for an OTP.
+ * @example
+ * isOtpRequired("npm error code EOTP");
+ */
+function isOtpRequired(output: string): boolean {
+  return /EOTP|one-time password/i.test(output);
+}
+
+/**
  * The exact registration command for this package and repository.
  *
  * @param name - The package name.
@@ -48,7 +61,7 @@ function isUnauthorized(output: string): boolean {
  * trustCommand("@moku-labs/common", "moku-labs/common");
  */
 function trustCommand(name: string, ownerRepo: string): string {
-  return `npm trust github ${name} --file ${PUBLISH_WORKFLOW_FILE} --repo ${ownerRepo} --yes`;
+  return `npm trust github ${name} --file ${PUBLISH_WORKFLOW_FILE} --repo ${ownerRepo} --allow-publish --yes`;
 }
 
 /** Verifies a trusted publisher is registered for the package. */
@@ -78,6 +91,13 @@ export const trustedPublisherCheck: ReleaseCheck = {
     // Logged out, the registry refuses to list publishers: unknown is not the same as missing
     if (isUnauthorized(`${listing.stdout}${listing.stderr}`)) {
       return skip("cannot list trusted publishers without `npm login`");
+    }
+    // Behind 2FA the listing wants an OTP: say so instead of reporting a missing registration
+    if (isOtpRequired(`${listing.stdout}${listing.stderr}`)) {
+      return warn(
+        "npm asks for an OTP, cannot verify from here",
+        `npm trust list ${manifest.name}`
+      );
     }
     if (listing.code !== 0 || !listing.stdout.includes(PUBLISH_WORKFLOW_FILE)) {
       return fail("no trusted publisher registered", trustCommand(manifest.name, ownerRepo));

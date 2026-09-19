@@ -129,8 +129,25 @@ describe("trustedPublisherCheck", () => {
 
     expect(result.status).toBe("fail");
     expect(result.fix).toBe(
-      "npm trust github @moku-labs/common --file publish.yml --repo moku-labs/common --yes"
+      "npm trust github @moku-labs/common --file publish.yml --repo moku-labs/common --allow-publish --yes"
     );
+  });
+
+  it("warns (not fails) when npm asks for an OTP, because the registration is unknown", async () => {
+    const result = await trustedPublisherCheck.run(
+      contextWith({
+        "npm trust list @moku-labs/common": {
+          code: 1,
+          stderr: "npm error code EOTP\nnpm error This operation requires a one-time password."
+        }
+      })
+    );
+
+    expect(result).toEqual({
+      status: "warn",
+      detail: "npm asks for an OTP, cannot verify from here",
+      fix: "npm trust list @moku-labs/common"
+    });
   });
 
   it("skips (not fails) when npm is logged out, because the listing needs auth", async () => {
