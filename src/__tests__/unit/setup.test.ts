@@ -178,6 +178,37 @@ describe("runSetup — workflows", () => {
     expect(test.files.tree[ciTemplate.path]).toBe(ciTemplate.content);
   });
 
+  it("keeps a thin caller that carries its own inputs, even under yes-to-all", async () => {
+    const withExtra = `${ciTemplate.content}    with:\n      extra: '["check:bundle"]'\n`;
+    const test = harness(AUTHENTICATED, { [ciTemplate.path]: withExtra });
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
+
+    expect(test.files.tree[ciTemplate.path]).toBe(withExtra);
+    expect(test.lines.join("\n")).toContain("thin caller with its own inputs");
+  });
+
+  it("runs for a released package that keeps no version in package.json", async () => {
+    const versionless = JSON.stringify(
+      { ...JSON.parse(MANIFEST), version: undefined },
+      undefined,
+      2
+    );
+    const test = harness(
+      {
+        ...AUTHENTICATED,
+        "npm view @moku-labs/common version": "2.3.1\n",
+        [["git", ...LATEST_TAG_ARGS].join(" ")]: "v2.3.1\n"
+      },
+      { "package.json": versionless }
+    );
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
+
+    expect(test.lines.join("\n")).toContain("already on npm");
+    expect(test.lines.join("\n")).toContain("latest is v2.3.1");
+  });
+
   it("leaves a differing workflow alone when the answer is no", async () => {
     const test = harness(AUTHENTICATED, { [ciTemplate.path]: LEGACY_CI }, false);
 
@@ -271,7 +302,7 @@ describe("runSetup — publish, tag, trust, ruleset", () => {
     await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
 
     expect(test.exec.captured).not.toContain("git tag -a v1.0.0 -m v1.0.0");
-    expect(test.lines.join("\n")).toContain("not tagged, the package is not on npm yet");
+    expect(test.lines.join("\n")).toContain("no version tag pushed, the package is not on npm yet");
   });
 
   it("pushes no tag when an unattended run hands the publish to the owner", async () => {

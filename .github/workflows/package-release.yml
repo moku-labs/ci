@@ -50,6 +50,11 @@ on:
         type: boolean
         required: false
         default: true
+      extra:
+        description: JSON array of extra scripts for the check job — keep it equal to the one in ci.yml.
+        type: string
+        required: false
+        default: "[]"
     outputs:
       tag:
         description: The tag cut by the release job (empty on the release:published path).
@@ -78,6 +83,7 @@ jobs:
       runs_on: ${{ inputs.runs_on }}
       bun_version: ${{ inputs.bun_version }}
       validate: ${{ inputs.validate }}
+      extra: ${{ inputs.extra }}
 
   # 2. Cut a tag-only release. Dispatch-on-main path only. NEVER writes refs/heads/main.
   release:

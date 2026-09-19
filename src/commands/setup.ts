@@ -132,23 +132,20 @@ async function isCommittedUnchanged(setup: SetupRun, path: string): Promise<bool
  *
  * @param setup - The wizard state.
  * @param template - The central workflow about to be written.
- * @param existing - The current contents of the file.
  * @returns `true` when the caller may write the template now.
  * @example
- * if (!(await clearExistingWorkflow(setup, template, existing))) continue;
+ * if (!(await clearExistingWorkflow(setup, template))) continue;
  */
 async function clearExistingWorkflow(
   setup: SetupRun,
-  template: (typeof workflowTemplates)[number],
-  existing: string
+  template: (typeof workflowTemplates)[number]
 ): Promise<boolean> {
-  const kind = isThinWorkflow(existing, template) ? "differs" : "is a legacy workflow";
-
   // A committed, unmodified file is already kept by git: a `.bak` would only litter the tree
   const committed = await isCommittedUnchanged(setup, template.path);
   const safety = committed ? "git keeps the original" : "a .bak copy is kept";
 
-  if (!(await setup.prompts.confirm(`${template.path} ${kind}. Replace it (${safety})?`))) {
+  const question = `${template.path} is a legacy workflow. Replace it (${safety})?`;
+  if (!(await setup.prompts.confirm(question))) {
     setup.ui.check(false, `${template.path} left unchanged`);
     return false;
   }
@@ -181,11 +178,17 @@ async function writeWorkflows(setup: SetupRun): Promise<void> {
       continue;
     }
 
+    // A thin caller that differs carries the project's own inputs (`with: extra: …`): keep it
+    if (existing !== undefined && isThinWorkflow(existing, template)) {
+      setup.ui.check(true, `${template.path} is a thin caller with its own inputs, left as is`);
+      continue;
+    }
+
     // An existing file is someone's work — never replace one without asking.
     const cleared =
       existing === undefined
         ? !deferred(setup, `write ${template.path}`)
-        : await clearExistingWorkflow(setup, template, existing);
+        : await clearExistingWorkflow(setup, template);
     if (!cleared) continue;
 
     await setup.ctx.files.write(template.path, template.content);
@@ -242,18 +245,28 @@ type PublishState = "present" | "published" | "absent";
  *
  * @param setup - The wizard state.
  * @param name - The package name.
- * @param version - The version about to be published.
+ * @param version - The version about to be published; a released package may keep none.
  * @returns Where the package stands on npm after this step.
  * @example
  * const state = await firstPublish(setup, "@moku-labs/common", "0.2.0");
  */
-async function firstPublish(setup: SetupRun, name: string, version: string): Promise<PublishState> {
+async function firstPublish(
+  setup: SetupRun,
+  name: string,
+  version: string | undefined
+): Promise<PublishState> {
   setup.ui.heading("First publish");
 
   const view = await setup.ctx.exec.capture("npm", ["view", name, "version"]);
   if (view.code === 0) {
     setup.ui.check(true, `${name}@${view.stdout.trim()} already on npm`);
     return "present";
+  }
+
+  // Only a package that is already released may keep its version in git tags alone
+  if (version === undefined) {
+    setup.ui.check(false, `${MANIFEST_PATH} has no \`version\`, a first publish needs one`);
+    return "absent";
   }
 
   if (!(await setup.prompts.confirm(`Publish ${name}@${version} to npm now?`))) {
@@ -288,7 +301,7 @@ async function firstPublish(setup: SetupRun, name: string, version: string): Pro
  * @example
  * await pushVersionTag(setup, "0.2.0");
  */
-async function pushVersionTag(setup: SetupRun, version: string): Promise<void> {
+async function pushVersionTag(setup: SetupRun, version: string | undefined): Promise<void> {
   setup.ui.heading("Tag");
 
   // A released package keeps its version in tags; `package.json` on main goes stale there,
@@ -297,6 +310,10 @@ async function pushVersionTag(setup: SetupRun, version: string): Promise<void> {
   const latest = latestVersionTag(listing.stdout);
   if (latest !== undefined) {
     setup.ui.check(true, `release tags exist, latest is ${latest}`);
+    return;
+  }
+  if (version === undefined) {
+    setup.ui.check(false, `${MANIFEST_PATH} has no \`version\` and the repo has no release tag`);
     return;
   }
 
@@ -447,8 +464,8 @@ export async function runSetup(options: SetupOptions): Promise<number> {
   if (!(await ensurePrerequisites(setup))) return 1;
 
   const manifest = await readManifest(setup.ctx.files);
-  if (!manifest?.name || !manifest.version) {
-    ui.error(`${MANIFEST_PATH} is missing, malformed, or has no name/version`);
+  if (!manifest?.name) {
+    ui.error(`${MANIFEST_PATH} is missing, malformed, or has no name`);
     return 1;
   }
 
@@ -459,7 +476,7 @@ export async function runSetup(options: SetupOptions): Promise<number> {
   // A version tag says "this is on npm": never push one for a publish that did not happen
   if (published === "absent") {
     ui.heading("Tag");
-    ui.check(false, `v${manifest.version} not tagged, the package is not on npm yet`);
+    ui.check(false, "no version tag pushed, the package is not on npm yet");
   } else await pushVersionTag(setup, manifest.version);
 
   await registerTrustedPublisher(setup);

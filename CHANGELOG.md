@@ -8,6 +8,12 @@ immutable `v1.x.y` tag.
 
 ### Added
 
+- `package-ci.yml` and `package-release.yml`: input `extra`, a JSON array of project scripts.
+  Each runs as its own job after a build, on pull requests and on the release path.
+- `package-ci.yml`: `build` and `preview` seed `package.json` from the latest `v*` tag when it
+  has no `version`, for packages that keep the version in tags only.
+- `setup` keeps a thin caller that differs from the template, and no longer needs a `version`
+  in `package.json` for a package that is already on npm.
 - `package-ci.yml`: job `preview` publishes every pull request commit to pkg.pr.new, and the
   new input `preview` (default `true`) turns it off. Needs the pkg.pr.new GitHub App.
 - `package-ci.yml`: the `lint` job fails when `package.json` depends on a `pkg.pr.new` URL.
