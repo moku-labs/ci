@@ -127,9 +127,11 @@ jobs:
           npm version "$base" --no-git-tag-version --allow-same-version >/dev/null
           new="$(npm version "$RELEASE_TYPE" --no-git-tag-version --preid rc)"
           new="${new#v}"
-          echo "version=$new" >> "$GITHUB_OUTPUT"
-          echo "tag=v$new" >> "$GITHUB_OUTPUT"
-          echo "prev_tag=$prev" >> "$GITHUB_OUTPUT" # explicit changelog base for --notes-start-tag
+          {
+            echo "version=$new"
+            echo "tag=v$new"
+            echo "prev_tag=$prev" # explicit changelog base for --notes-start-tag
+          } >> "$GITHUB_OUTPUT"
       - name: Commit the bump locally and push the TAG ONLY
         env:
           TAG: ${{ steps.bump.outputs.tag }}
