@@ -1,6 +1,7 @@
 import { createBrandConsole } from "@moku-labs/common/cli";
 import { describe, expect, it } from "vitest";
 import { runSetup } from "../../commands/setup";
+import { LATEST_TAG_ARGS } from "../../lib/git";
 import { REQUIRED_SCRIPTS } from "../../lib/package-json";
 import { workflowTemplates } from "../../lib/templates";
 import type { CheckContext } from "../../types";
@@ -160,6 +161,23 @@ describe("runSetup — workflows", () => {
     expect(test.files.tree[ciTemplate.path]).toBe(ciTemplate.content);
   });
 
+  it("keeps no .bak when git already holds the original", async () => {
+    const test = harness(
+      {
+        ...AUTHENTICATED,
+        [`git ls-files --error-unmatch ${ciTemplate.path}`]: `${ciTemplate.path}\n`,
+        [`git status --porcelain -- ${ciTemplate.path}`]: ""
+      },
+      { [ciTemplate.path]: LEGACY_CI }
+    );
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
+
+    expect(test.asked.some(question => question.includes("git keeps the original"))).toBe(true);
+    expect(test.files.tree[`${ciTemplate.path}.bak`]).toBeUndefined();
+    expect(test.files.tree[ciTemplate.path]).toBe(ciTemplate.content);
+  });
+
   it("leaves a differing workflow alone when the answer is no", async () => {
     const test = harness(AUTHENTICATED, { [ciTemplate.path]: LEGACY_CI }, false);
 
@@ -237,6 +255,18 @@ describe("runSetup — publish, tag, trust, ruleset", () => {
     await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
 
     expect(test.exec.captured).not.toContain("git tag -a v1.0.0 -m v1.0.0");
+  });
+
+  it("tags nothing when release tags exist, because package.json is stale there", async () => {
+    const test = harness({
+      ...AUTHENTICATED,
+      [["git", ...LATEST_TAG_ARGS].join(" ")]: "v0.8.0\nv0.7.0\n"
+    });
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
+
+    expect(test.exec.captured).not.toContain("git tag -a v1.0.0 -m v1.0.0");
+    expect(test.lines.join("\n")).toContain("latest is v0.8.0");
   });
 
   it("registers the trusted publisher with the check's own fix command", async () => {

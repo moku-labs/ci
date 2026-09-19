@@ -133,4 +133,17 @@ describe("formatManifest", () => {
 
     expect(text).toBe('{\n  "name": "x"\n}\n');
   });
+
+  it("keeps an ASCII-only source ASCII-only, so an escaped dash is not a diff line", () => {
+    const source = '{\n  "description": "a \\u2014 b"\n}\n';
+    const text = formatManifest({ description: "a — b" }, source);
+
+    expect(text).toBe(source);
+  });
+
+  it("leaves raw characters alone when the source already had them", () => {
+    const text = formatManifest({ description: "a — b" }, '{ "description": "a — b" }');
+
+    expect(text).toContain("a — b");
+  });
 });
