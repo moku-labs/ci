@@ -74,20 +74,24 @@ export type Executor = {
 };
 
 /**
- * Normalize whatever `execFile` rejected with into a {@link CommandOutput}. A non-zero exit
- * carries `code` plus both streams; a missing binary carries an `ENOENT`-style string code
- * and no exit status at all.
+ * Normalize a failed `execFile` call into a {@link CommandOutput}. A non-zero exit carries
+ * `code` and both streams; a missing binary carries an `ENOENT`-style string code, no exit
+ * status and no output, so the error text stands in for stderr.
  *
- * @param error - The rejection value from `execFile`.
+ * @param error - The error `execFile` passed to its callback.
+ * @param stdout - What the child wrote to stdout before it failed.
+ * @param stderr - What the child wrote to stderr before it failed.
  * @returns The equivalent captured output.
  * @example
- * fromExecError({ code: 1, stdout: "", stderr: "not logged in" });
+ * fromExecError({ code: 1 }, "", "not logged in");
  */
-function fromExecError(error: unknown): CommandOutput {
-  const shape = error as { code?: number | string; stdout?: string; stderr?: string };
+function fromExecError(error: unknown, stdout: string, stderr: string): CommandOutput {
+  const shape = error as { code?: number | string };
   const code = typeof shape.code === "number" ? shape.code : COMMAND_NOT_FOUND;
 
-  return { code, stdout: shape.stdout ?? "", stderr: shape.stderr ?? String(error) };
+  // The callback form of `execFile` hands the streams over as arguments, not on the error.
+  // Checks read them to tell "npm has no such command" from "nothing is registered".
+  return { code, stdout, stderr: stderr === "" && stdout === "" ? String(error) : stderr };
 }
 
 /**
@@ -121,7 +125,7 @@ export function createExecutor(cwd: string): Executor {
         [...args],
         { cwd: options.cwd ?? cwd },
         (error, stdout, stderr) => {
-          if (error) return resolve(fromExecError(error));
+          if (error) return resolve(fromExecError(error, stdout, stderr));
           resolve({ code: 0, stdout, stderr });
         }
       );
