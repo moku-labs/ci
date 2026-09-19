@@ -5,7 +5,12 @@
  * move through a PR, so a release always describes a reviewed state.
  */
 import { ownerRepoFrom } from "../lib/git";
-import { activeBranchRulesetIds, hasMainBranchRuleset, requiredCheckContexts } from "../lib/github";
+import {
+  activeBranchRulesetIds,
+  hasMainBranchRuleset,
+  requiredCheckContexts,
+  requiredChecksDrift
+} from "../lib/github";
 import { readManifest, repositoryUrlOf } from "../lib/package-json";
 import { pass, skip, warn } from "../lib/result";
 import { renderMainRuleset } from "../lib/templates";
@@ -22,7 +27,7 @@ export type StaleRuleset = {
   id: number;
   /** The full ruleset as `gh api` printed it. */
   body: string;
-  /** The required contexts that are not central `ci / …` checks. */
+  /** The required contexts that are a central check without the `ci / ` prefix. */
   legacy: string[];
 };
 
@@ -42,13 +47,14 @@ export async function findStaleRuleset(
   ownerRepo: string,
   listing: string
 ): Promise<StaleRuleset | undefined> {
-  const central = new Set(requiredCheckContexts(renderMainRuleset()));
+  const central = requiredCheckContexts(renderMainRuleset());
 
   for (const id of activeBranchRulesetIds(listing)) {
     const detail = await ctx.exec.capture("gh", ["api", `repos/${ownerRepo}/rulesets/${id}`]);
     if (detail.code !== 0) continue;
 
-    const legacy = requiredCheckContexts(detail.stdout).filter(context => !central.has(context));
+    // A project's own required check (`ci-pass` of a matrix workflow) is not legacy
+    const { legacy } = requiredChecksDrift(requiredCheckContexts(detail.stdout), central);
     if (legacy.length > 0) return { id, body: detail.stdout, legacy };
   }
 

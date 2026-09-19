@@ -254,6 +254,25 @@ describe("branchRulesetCheck", () => {
     expect(result.status).toBe("pass");
   });
 
+  it("passes when the ruleset adds a project check of its own", async () => {
+    const withOwn = JSON.parse(renderMainRuleset()) as {
+      rules: { type: string; parameters?: { required_status_checks?: { context: string }[] } }[];
+    };
+    for (const rule of withOwn.rules)
+      rule.parameters?.required_status_checks?.push({ context: "ci-pass" });
+
+    const result = await branchRulesetCheck.run(
+      contextWith({
+        "gh api repos/moku-labs/common/rulesets": JSON.stringify([
+          { id: 7, name: "protect-main", target: "branch", enforcement: "active" }
+        ]),
+        "gh api repos/moku-labs/common/rulesets/7": JSON.stringify(withOwn)
+      })
+    );
+
+    expect(result.status).toBe("pass");
+  });
+
   it("warns when main is unprotected", async () => {
     const result = await branchRulesetCheck.run(
       contextWith({ "gh api repos/moku-labs/common/rulesets": "[]" })

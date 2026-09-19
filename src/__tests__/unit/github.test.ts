@@ -5,6 +5,7 @@ import {
   latestRunId,
   releaseUrl,
   requiredCheckContexts,
+  requiredChecksDrift,
   withCentralRequiredChecks
 } from "../../lib/github";
 
@@ -66,7 +67,53 @@ describe("requiredCheckContexts", () => {
   });
 });
 
+describe("requiredChecksDrift", () => {
+  const central = ["ci / lint", "ci / test"];
+
+  it("calls a central name without the caller prefix legacy", () => {
+    expect(requiredChecksDrift(["lint", "ci / test"], central)).toEqual({
+      legacy: ["lint"],
+      missing: ["ci / lint"]
+    });
+  });
+
+  it("leaves a project's own check alone", () => {
+    expect(requiredChecksDrift(["ci / lint", "ci / test", "ci-pass"], central)).toEqual({
+      legacy: [],
+      missing: []
+    });
+  });
+});
+
 describe("withCentralRequiredChecks", () => {
+  it("keeps a project's own required check next to the central ones", () => {
+    const existing = JSON.stringify({
+      rules: [
+        {
+          type: "required_status_checks",
+          parameters: { required_status_checks: [{ context: "lint" }, { context: "ci-pass" }] }
+        }
+      ]
+    });
+    const template = JSON.stringify({
+      rules: [
+        {
+          type: "required_status_checks",
+          parameters: { required_status_checks: [{ context: "ci / lint" }] }
+        }
+      ]
+    });
+
+    expect(JSON.parse(withCentralRequiredChecks(existing, template))).toEqual({
+      rules: [
+        {
+          type: "required_status_checks",
+          parameters: { required_status_checks: [{ context: "ci / lint" }, { context: "ci-pass" }] }
+        }
+      ]
+    });
+  });
+
   it("keeps the other rules and swaps in the central required checks", () => {
     const existing = JSON.stringify({
       rules: [
