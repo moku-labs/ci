@@ -141,6 +141,22 @@ describe("formatManifest", () => {
     expect(text).toBe(source);
   });
 
+  it("keeps an untouched one-line value on one line, the way biome formats it", () => {
+    const source =
+      '{\n  "name": "x",\n  "files": ["dist", "LICENSE"],\n  "scripts": {\n    "a": "b"\n  }\n}\n';
+    const manifest = { name: "x", files: ["dist", "LICENSE"], scripts: { a: "b", c: "d" } };
+
+    expect(formatManifest(manifest, source)).toBe(
+      '{\n  "name": "x",\n  "files": ["dist", "LICENSE"],\n  "scripts": {\n    "a": "b",\n    "c": "d"\n  }\n}\n'
+    );
+  });
+
+  it("expands a one-line value that changed", () => {
+    const source = '{\n  "files": ["dist"]\n}\n';
+
+    expect(formatManifest({ files: ["dist", "README.md"] }, source)).toContain('[\n    "dist",');
+  });
+
   it("leaves raw characters alone when the source already had them", () => {
     const text = formatManifest({ description: "a — b" }, '{ "description": "a — b" }');
 
