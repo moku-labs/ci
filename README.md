@@ -1,173 +1,184 @@
-# moku-labs/ci
+<div align="center">
 
-Central CI + release logic for the moku family, consumed as **reusable workflows pinned by tag**.
+# @moku-labs/ci
 
-Before this repo, every package carried its own ~250-line copy of `ci.yml` + `publish.yml`.
-Seven repos had drifted into seven different `ci.yml` and six different `publish.yml` — the
-same hard-won lessons fixed in one file and missing in another. Here they live once.
+**One CI and release pipeline for every moku package.**
 
-```
-.github/workflows/package-ci.yml       lint · types · test · build(+validate)
-.github/workflows/package-release.yml  check → release (tag-only) → package → publish (OIDC)
-.github/workflows/app-deploy.yml       validate → deploy to Cloudflare (Layer-3 apps)
-.github/workflows/self-test.yml        actionlint over everything in this repo
-examples/                              the thin caller files a project commits
-rulesets/main.json                     branch ruleset payload for `gh api`
-src/                                   the `moku-release` CLI, published as `@moku-labs/ci`
-```
+Reusable GitHub workflows pinned by tag, plus the `moku-release` CLI that installs them
+into a project and runs a release. A project keeps two 20-line files and seven scripts;
+everything else lives here, once. Not a build tool and not a framework — it calls your
+`package.json` scripts and never the tools behind them.
 
-## The `moku-release` CLI
+<br/>
 
-The same repository ships the CLI that installs these files into a project. It reads
-`examples/` and `rulesets/` from its own package, so a workflow and its template are one file.
+[![npm](https://img.shields.io/npm/v/@moku-labs/ci?logo=npm&color=cb3837&label=npm)](https://www.npmjs.com/package/@moku-labs/ci)
+[![self test](https://github.com/moku-labs/ci/actions/workflows/self-test.yml/badge.svg)](https://github.com/moku-labs/ci/actions/workflows/self-test.yml)
+[![workflows](https://img.shields.io/badge/workflows-%40v1-1864ab)](#versioning)
+[![node](https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white)](#requirements)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
-```bash
+<br/>
+
+[Install](#install) ·
+[How it works](#how-it-works) ·
+[Workflows](#workflows) ·
+[CLI](#cli) ·
+[The contract](#the-contract) ·
+[Versioning](#versioning) ·
+[Scripts](#scripts)
+
+</div>
+
+---
+
+## Install
+
+```sh
 bun add -d @moku-labs/ci
-bun run release:setup      # once per project
-bun run release:doctor     # any time, read-only
-bun run release patch      # each release
+bun run release:setup
 ```
 
-Details: [src/README.md](src/README.md).
+`setup` writes the two workflow files, adds the missing scripts, does the first publish,
+registers the trusted publisher and applies the branch ruleset. Run it again any time — it
+only does what is still missing.
 
-## The project contract
+> [!NOTE]
+> **Status: `1.x`, early.** `package-ci.yml` runs on this repo's own PRs. `package-release.yml`
+> and the CLI's `setup` and `release` have passed dry-run and unit tests only; they have not
+> yet released a live package.
 
-A consuming package exposes exactly these seven `package.json` scripts. The workflows call
-script **names** and never the tools behind them — that is what lets one central file serve
-seven different packages.
+> [!IMPORTANT]
+> Two steps are yours alone. The CLI never handles a credential, and there is no `NPM_TOKEN`
+> anywhere — publishing is tokenless OIDC.
+>
+> ```sh
+> gh auth login
+> npm login
+> ```
 
-| script      | what CI does with it                                         |
-| ----------- | ------------------------------------------------------------ |
-| `build`     | `build` job, and again in `package` before `npm pack`        |
-| `validate`  | `build` job — publint + attw (node16 profile)                |
-| `lint`      | `lint` job — biome check (incl. format) + eslint             |
-| `lint:fix`  | local only                                                   |
-| `format`    | local only                                                   |
-| `typecheck` | `types` job — `tsc --noEmit`                                 |
-| `test`      | `test` job — `vitest run` (never `bun test`)                 |
+## Why @moku-labs/ci
 
-**Project-specific work goes inside the script, not into the central YAML.** `room` runs a
-second typecheck pass; that is `"typecheck": "tsc --noEmit && tsc -p tsconfig.worker.json --noEmit"`
-in `room`'s own `package.json`. Same for bundle-size gates, sandbox runs and chaos suites: fold
-them into a contract script, or keep an extra job in the project's own `ci.yml` next to the
-`uses:` call.
+- **One copy of the pipeline.** Seven repos had seven different `ci.yml` and six different
+  `publish.yml`. A fix now lands here and reaches every project through the `@v1` tag.
+- **Scripts are the interface, not tools.** The workflows call `bun run lint`, never `biome`.
+  A project with special needs changes its own script, not the central YAML.
+- **The CLI and its templates are one package.** `moku-release` reads `examples/` and
+  `rulesets/` from its own install. There is no second copy to drift.
+- **No tokens.** npm Trusted Publishing with `id-token: write`. Build and publish run in
+  separate jobs, so no dependency's postinstall ever sees the credential.
+- **Not a dependency of your app.** A dev dependency with zero runtime dependencies of its
+  own, so even `@moku-labs/core` can use it without a cycle.
 
-## Adopt it in three steps
+## How it works
 
-1. **Replace the two workflow files** with the thin callers from `examples/package/`
-   (`ci.yml`, `publish.yml`). Keep the filename `publish.yml` — npm Trusted Publishing is
-   registered against it.
-2. **Make sure the seven scripts exist** and do the whole job (see above).
-3. **Re-apply the branch ruleset** — the required status-check names changed (see below):
-   ```bash
-   gh api -X POST repos/<owner>/<repo>/rulesets --input rulesets/main.json
-   gh api -X PATCH repos/<owner>/<repo> -F delete_branch_on_merge=true
-   ```
+```mermaid
+flowchart LR
+  P["your project<br/>ci.yml · publish.yml<br/>7 scripts"] -->|"uses: …@v1"| W["moku-labs/ci<br/>reusable workflows"]
+  C["moku-release<br/>setup · doctor · release"] -->|writes| P
+  C -->|dispatches| W
+  W --> N["checks on the PR<br/>tag · GitHub release · npm"]
+  classDef u fill:#0b7285,stroke:#08525f,color:#fff;
+  classDef m fill:#1864ab,stroke:#0d3d6e,color:#fff;
+  class P,N u
+  class W,C m
+```
 
-A Layer-3 app adopts `examples/app/ci.yml` instead and needs `deploy` (+ optionally
-`build:worker`, `migrate:remote`) as scripts.
+1. `release:setup` writes two thin callers into `.github/workflows/`.
+2. Every PR runs `package-ci.yml`: four jobs, reported as `ci / lint`, `ci / types`,
+   `ci / test`, `ci / build`.
+3. `release patch` dispatches `publish.yml`, which calls `package-release.yml`:
+   check → tag → pack → publish. The CLI watches the run and verifies the version on npm.
 
-> **Status-check names change on adoption.** GitHub prefixes a reusable workflow's jobs with
-> the **caller's job id**, so `lint` becomes `ci / lint`. `rulesets/main.json` already uses the
-> prefixed form, matching the `ci:` job id in `examples/package/ci.yml`. Rename that job and you
-> must rename the contexts too.
+## Workflows
 
-## Versioning policy
+| Workflow | Called from | Jobs | Inputs (all optional) |
+|---|---|---|---|
+| [`package-ci.yml`](.github/workflows/package-ci.yml) | [`examples/package/ci.yml`](examples/package/ci.yml) | `lint` · `types` · `test` · `build` | `runs_on`, `bun_version`, `validate` |
+| [`package-release.yml`](.github/workflows/package-release.yml) | [`examples/package/publish.yml`](examples/package/publish.yml) | `check` → `release` → `package` → `publish` | `release_type`, `publish`, `runs_on`, `bun_version`, `node_version`, `artifact_name`, `validate` |
+| [`app-deploy.yml`](.github/workflows/app-deploy.yml) | [`examples/app/ci.yml`](examples/app/ci.yml) | `validate` → `deploy` to Cloudflare | script names (`lint_script`, `build_script`, `deploy_script`, …) and two required secrets |
+| [`self-test.yml`](.github/workflows/self-test.yml) | this repo only | `actionlint` over workflows and examples | — |
 
-- **`v1`** — moving major tag. Callers pin `@v1` and get fixes automatically. It moves only
-  for backwards-compatible changes (new optional inputs, comment and hardening fixes).
-- **`v1.x.y`** — immutable annotated tag on every change. Pin one of these to freeze a repo.
-- A breaking change (removing an input, changing a default, renaming a job) ships as **`v2`**;
-  `v1` keeps pointing at the last v1 commit until every consumer has moved.
+`package-release.yml` outputs `tag`, `version`, `prev_tag` and `artifact_name`.
 
-Changes here execute in seven repos with `contents: write` and `id-token: write`. Review them
+| Other file | What it is |
+|---|---|
+| [`examples/package/publish.local-publish.yml`](examples/package/publish.local-publish.yml) | Fallback: publish from the project's own job. Use it only if the central publish fails npm auth. |
+| [`rulesets/main.json`](rulesets/main.json) | Branch ruleset for `main`: PR only, no force-push, the four `ci / …` checks required. |
+
+> [!TIP]
+> A Layer-3 app copies `examples/app/ci.yml` by hand and needs a `deploy` script. The CLI
+> sets up packages only.
+
+## CLI
+
+| Command | When | What it does |
+|---|---|---|
+| `bun run release:setup` | once per project | Idempotent wizard: workflows, script contract, first publish, first tag, trusted publisher, branch ruleset, then `doctor`. `--dry-run` prints every action and changes nothing. |
+| `bun run release:doctor` | any time | Read-only. Eleven checks, one line each, and the exact `fix:` command for every red line. `--json` for machines. |
+| `bun run release <patch\|minor\|major\|prerelease>` | each release | Refuses unless the tree is clean and `HEAD == origin/main`. Dispatches `publish.yml`, watches the run, verifies the version and dist-tag on npm. |
+
+The scripts are plain aliases of the `moku-release` bin. Internals and the list of checks:
+[src/README.md](src/README.md).
+
+## The contract
+
+A package exposes exactly these seven scripts. `setup` adds the ones that are missing;
+`doctor` reports them.
+
+| Script | Used by |
+|---|---|
+| `build` | `build` job, and again before `npm pack` |
+| `validate` | `build` job — publint + attw |
+| `lint` | `lint` job — biome check + eslint |
+| `typecheck` | `types` job — `tsc --noEmit` |
+| `test` | `test` job — `vitest run`, never `bun test` |
+| `lint:fix` | local only |
+| `format` | local only |
+
+Project-specific work goes inside the script. `room` needs a second typecheck pass, so its
+script is `"typecheck": "tsc --noEmit && tsc -p tsconfig.worker.json --noEmit"`. The central
+YAML stays the same for everyone.
+
+> [!IMPORTANT]
+> Keep the caller's job id `ci` and the filename `publish.yml`. GitHub prefixes the check
+> names with the job id (`ci / lint`), and npm Trusted Publishing is registered against the
+> filename. Rename either and the ruleset or the publish breaks.
+
+## Versioning
+
+| Ref | Meaning |
+|---|---|
+| `@v1` | Moving major tag. Projects pin this and get fixes automatically. Moves only for backwards-compatible changes. |
+| `@v1.x.y` | Immutable tag on every change. Pin it to freeze a project. |
+| `@v2` | Any breaking change: a removed input, a changed default, a renamed job. `v1` stays where it was. |
+
+A change here runs in every moku repo with `contents: write` and `id-token: write`. Review it
 like release engineering, not like config.
 
-## Known risk: OIDC identity of a cross-repo publish
+## When a release fails
 
-npm Trusted Publishing validates the workflow identity in the OIDC token. When the publish step
-runs inside a reusable workflow owned by **another** repository, the token carries two claims:
+One risk is still open: npm may reject a publish that runs inside a workflow owned by another
+repository. It is unverified until the first live release. The fallback and sixteen other
+traps the workflows already handle are in [docs/release-notes.md](docs/release-notes.md).
 
-| claim              | points at                                       |
-| ------------------ | ----------------------------------------------- |
-| `workflow_ref`     | `<owner>/<repo>/.github/workflows/publish.yml`   |
-| `job_workflow_ref` | `moku-labs/ci/.github/workflows/package-release.yml` |
+## Scripts
 
-**Whether npm accepts that combination is unverified.** npm documents matching on the workflow
-filename you register; which of the two claims it matches is what decides it. The first real
-release through this repo is the experiment.
+```sh
+bun run build        # tsdown → dist/release.mjs
+bun run validate     # publint
+bun run lint         # biome check + eslint
+bun run lint:fix
+bun run format
+bun run typecheck    # tsc --noEmit
+bun run test         # vitest run
+```
 
-**If the publish job fails auth** (and only then), switch that package to the fallback: copy
-`examples/package/publish.local-publish.yml` over its `publish.yml`. It keeps check / release /
-package central, passes `publish: false`, and runs a ~35-line `npm publish` job locally, so
-`job_workflow_ref` points back at the package's own `publish.yml`. Nothing else changes; the
-tarball is consumed from the central workflow's `artifact_name` output.
+## Requirements
 
-Do not pre-emptively switch everything to the fallback — the whole point is one copy of the
-logic. Try the central path first on one package (`system` is the lowest-traffic), then decide.
-
-## Gotchas encoded in these workflows
-
-Each line: symptom → cause → what the workflow does.
-
-- **Reusable workflow never starts, run shows 0 jobs** → the caller's `concurrency` group equals
-  the group the called workflow computes (both resolve `github.workflow` to the caller), so the
-  parent holds the slot while the child waits → `package-ci.yml` owns the group
-  `${{ github.workflow }}-<ref>`, `package-release.yml` sets none, and the `publish.yml` caller
-  uses a distinct literal `publish-<ref>`.
-- **A push to main cancels a release's checks** → one shared concurrency group for CI and release
-  → the group is scoped by `github.workflow`, so `CI-<ref>` and `Release-<ref>` never collide.
-- **`npm version patch` finalizes an rc instead of bumping, then the tag already exists** → a
-  stray prerelease tag sorted highest and became the base → `git -c versionsort.suffix='-'`
-  ranks prereleases below their release.
-- **Release notes repeat every past PR** → each version tag sits on a bump commit that is not an
-  ancestor of the next, so `--generate-notes` cannot auto-detect the base → the previous tag is
-  passed explicitly via `--notes-start-tag`.
-- **An rc shows up as the repo's "Latest release"** → GitHub defaults to latest-by-date → a tag
-  containing `-` gets `--prerelease --latest=false`.
-- **A prerelease overwrites the `latest` dist-tag on npm** → publishing without `--tag` →
-  a `-` in the version publishes to `next`.
-- **Release job dies pushing to a protected `main`** → it tried to commit the version bump →
-  the bump is committed locally and only `refs/tags/<tag>` is pushed; `package.json` `version`
-  on main is informational, the tag and npm are the truth.
-- **`npm pack --pack-destination dist-pack` fails ENOENT** → npm does not create the directory →
-  `mkdir -p dist-pack` first.
-- **`npm publish dist-pack/foo.tgz` tries `git ls-remote`** → npm parses a bare path as an
-  `owner/repo` spec → the leading `./` is mandatory.
-- **A dependency's postinstall runs with the publish credential in scope** → build and publish in
-  one job → `package` (no `id-token`) builds and uploads the tarball; `publish` (`id-token: write`)
-  only downloads and publishes.
-- **Publish fails auth on a fresh runner** → npm older than 11.5.1 has no Trusted Publishing →
-  the floor is asserted fail-closed against the npm bundled with Node 24; never
-  `npm install -g npm@latest` next to a credential.
-- **A dispatch publishes the OLD code under a NEW version** → the workflow releases from
-  `origin/main` at run time, not from your tree → confirm the PR is **merged** and
-  `HEAD == origin/main` before dispatching, then verify the tarball's contents, not just its
-  version number.
-- **A skipped `release` job falls through and publishes an empty version** → `always()` gating →
-  the publish step fails closed on an empty ref and on a `package.json`/ref mismatch.
-- **Script injection via a workflow input** → `${{ }}` interpolated into a shell → every input,
-  tag and ref goes through `env:` and is read as `$VAR`.
-- **Secrets are empty inside the called workflow** → reusable workflows do not inherit secrets →
-  `app-deploy.yml` declares them under `secrets:` and the caller passes each one explicitly.
-- **`permissions` in the called workflow are ignored** → a called workflow can never elevate →
-  the caller's job grants `contents: write` + `id-token: write` as the ceiling.
-
-Longer form, with the reasoning: `moku-labs/claude` →
-`skills/moku-core/references/ci-release.md`.
-
-## First-time npm setup (per package, once)
-
-Trusted Publishing cannot be configured for a package that does not exist yet, so the first
-publish is manual: `bun run build && npm publish --access public` (no provenance — expected),
-then `git tag vX.Y.Z && git push origin vX.Y.Z`, then npmjs.com → package → **Settings → Trusted
-Publisher → GitHub Actions** with **Workflow filename `publish.yml`** and a blank environment.
-`package.json` `repository.url` must match the repo or provenance publishing fails `E422`.
-
-**Never add an `NPM_TOKEN`.** Publishing here is tokenless OIDC; a token-based publish is both
-exfiltratable and incompatible with provenance + Trusted Publishing. If you find one in a repo,
-delete it.
+Node ≥ 24 · Bun ≥ 1.3.14 · `gh` and `npm` ≥ 11.5.1 on the machine that runs `setup` or
+`release`. The CLI prints through the
+[@moku-labs/common](https://github.com/moku-labs/common) brand kit, bundled at build time.
 
 ## License
 
-MIT © moku-labs
+[MIT](./LICENSE) © [moku-labs](https://github.com/moku-labs)
