@@ -23,13 +23,13 @@ import { runDoctor } from "./doctor";
 const PUBLISH_WORKFLOW_FILE = PUBLISH_WORKFLOW_PATH.split("/").pop() ?? "publish.yml";
 
 /** How long to keep asking the registry for the new version before giving up. */
-const REGISTRY_POLL_ATTEMPTS = 24;
+const REGISTRY_POLL_ATTEMPTS = 60;
 
-/** Gap between registry polls — 24 × 5s ≈ two minutes of registry lag tolerated. */
-const REGISTRY_POLL_INTERVAL_MS = 5000;
+/** Gap between registry polls — 60 × 10s = ten minutes. The first live release needed three. */
+const REGISTRY_POLL_INTERVAL_MS = 10_000;
 
 /** How many times to look for the dispatched run before concluding it never started. */
-const RUN_LOOKUP_ATTEMPTS = 10;
+const RUN_LOOKUP_ATTEMPTS = 20;
 
 /** Gap between run lookups — GitHub takes a moment to materialize a dispatched run. */
 const RUN_LOOKUP_INTERVAL_MS = 3000;
@@ -93,36 +93,55 @@ async function preflight(ctx: CheckContext, ui: BrandConsole): Promise<boolean> 
   return !report.failed;
 }
 
+/** The `gh run list` call that names the newest `publish.yml` run on main. */
+const LATEST_RUN_ARGS = [
+  "run",
+  "list",
+  "--workflow",
+  PUBLISH_WORKFLOW_FILE,
+  "--branch",
+  "main",
+  "--limit",
+  "1",
+  "--json",
+  "databaseId"
+] as const;
+
 /**
- * Find the run the dispatch just created, retrying while GitHub materializes it.
+ * The newest `publish.yml` run right now. Read BEFORE the dispatch, it is the run the
+ * dispatch must not be confused with.
  *
  * @param ctx - The ports and flags.
- * @param sleep - The delay helper.
- * @returns The run id, or `undefined` when no run appeared.
+ * @returns The run id, or `undefined` when the workflow never ran.
  * @example
- * const runId = await findDispatchedRun(ctx, defaultSleep);
+ * const previous = await newestRun(ctx);
+ */
+async function newestRun(ctx: CheckContext): Promise<string | undefined> {
+  const listing = await ctx.exec.capture("gh", LATEST_RUN_ARGS);
+
+  return listing.code === 0 ? latestRunId(listing.stdout) : undefined;
+}
+
+/**
+ * Find the run the dispatch just created, retrying while GitHub materializes it. The
+ * newest run is only ours once it differs from `previous`: asked too early, GitHub still
+ * answers with the run of the release before.
+ *
+ * @param ctx - The ports and flags.
+ * @param previous - The newest run id from before the dispatch.
+ * @param sleep - The delay helper.
+ * @returns The run id, or `undefined` when no new run appeared.
+ * @example
+ * const runId = await findDispatchedRun(ctx, previous, defaultSleep);
  */
 async function findDispatchedRun(
   ctx: CheckContext,
+  previous: string | undefined,
   sleep: (ms: number) => Promise<void>
 ): Promise<string | undefined> {
-  const args = [
-    "run",
-    "list",
-    "--workflow",
-    PUBLISH_WORKFLOW_FILE,
-    "--branch",
-    "main",
-    "--limit",
-    "1",
-    "--json",
-    "databaseId"
-  ];
-
   for (let attempt = 0; attempt < RUN_LOOKUP_ATTEMPTS; attempt += 1) {
-    const listing = await ctx.exec.capture("gh", args);
-    const runId = listing.code === 0 ? latestRunId(listing.stdout) : undefined;
-    if (runId !== undefined) return runId;
+    const runId = await newestRun(ctx);
+    if (runId !== undefined && runId !== previous) return runId;
 
     await sleep(RUN_LOOKUP_INTERVAL_MS);
   }
@@ -229,6 +248,7 @@ export async function runRelease(options: ReleaseOptions): Promise<number> {
   }
 
   ui.heading("Dispatch");
+  const previousRun = await newestRun(ctx);
   const dispatched = await ctx.exec.capture("gh", [
     "workflow",
     "run",
@@ -244,7 +264,7 @@ export async function runRelease(options: ReleaseOptions): Promise<number> {
   }
   ui.check(true, `${PUBLISH_WORKFLOW_FILE} dispatched (${releaseType})`);
 
-  const runId = await findDispatchedRun(ctx, sleep);
+  const runId = await findDispatchedRun(ctx, previousRun, sleep);
   if (runId === undefined) {
     ui.error("the dispatched run never appeared — check GitHub Actions");
     return 1;
@@ -260,7 +280,9 @@ export async function runRelease(options: ReleaseOptions): Promise<number> {
   ui.heading("Registry");
   const version = await awaitPublishedVersion(ctx, manifest.name, tag, before, sleep);
   if (version === undefined) {
-    ui.error(`npm dist-tag \`${tag}\` did not move — the run passed but nothing was published`);
+    ui.error(
+      `npm dist-tag \`${tag}\` did not move in ten minutes — the run passed, so check \`npm view ${manifest.name} dist-tags\` before releasing again`
+    );
     return 1;
   }
 

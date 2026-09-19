@@ -13,7 +13,7 @@ runs inside a reusable workflow owned by **another** repository, the token carri
 | `workflow_ref`     | `<owner>/<repo>/.github/workflows/publish.yml`   |
 | `job_workflow_ref` | `moku-labs/ci/.github/workflows/package-release.yml` |
 
-**Whether npm accepts that combination is unverified.** npm documents matching on the workflow
+**npm accepts that combination: verified on 2026-09-19 by `@moku-labs/ci@1.1.1`** (run `35423961348`, provenance published). The text below is kept for the day that changes. Before that release it read: whether npm accepts that combination is unverified. npm documents matching on the workflow
 filename you register; which of the two claims it matches is what decides it. The first real
 release through this repo is the experiment.
 

@@ -6,6 +6,17 @@ immutable `v1.x.y` tag.
 
 ## [Unreleased]
 
+### Fixed
+
+- `moku-release release` watched the run of the release before when GitHub had not listed the
+  new run yet. It now remembers the newest run before the dispatch and waits for a different one.
+- The registry wait is ten minutes instead of two; the first live release needed three.
+
+### Docs
+
+- `v1` must be a lightweight tag (an annotated one breaks the nested `./` workflow call).
+- The cross-repo OIDC publish is verified.
+
 ### Added
 
 - `moku-release` CLI (`setup`, `doctor`, `<patch|minor|major|prerelease>`), published as
