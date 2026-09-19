@@ -30,6 +30,11 @@ on:
         type: boolean
         required: false
         default: true
+      preview:
+        description: Publish a pkg.pr.new preview of every pull request commit.
+        type: boolean
+        required: false
+        default: true
 
 # Scope the group by github.workflow: a release's reuse of CI runs under the "Release"
 # workflow name, so it never shares a group with — and never cancels — a standalone CI run.
@@ -47,6 +52,15 @@ jobs:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
           persist-credentials: false
+      - name: Refuse pkg.pr.new preview dependencies
+        # A preview URL is for local testing only. It must never reach main: the tarball
+        # has no provenance and the URL dies with the PR.
+        run: |
+          set -euo pipefail
+          if grep -n 'pkg\.pr\.new' package.json; then
+            echo "package.json depends on a pkg.pr.new preview — release the upstream package first"
+            exit 1
+          fi
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ inputs.bun_version }}
@@ -90,3 +104,23 @@ jobs:
       - run: bun run build # tsdown — index + cli entries
       - if: inputs.validate
         run: bun run validate # publint + attw (node16 profile)
+
+  # Preview of the PR's package on pkg.pr.new — nothing is published to npm, no token is in
+  # scope. Needs the pkg.pr.new GitHub App on the repo. NOT a required check (rulesets/main.json).
+  # Skipped on push and on the release path: there `github.event_name` is the caller's
+  # workflow_dispatch / release, never pull_request.
+  preview:
+    needs: build
+    if: inputs.preview && github.event_name == 'pull_request'
+    runs-on: ${{ inputs.runs_on }}
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ inputs.bun_version }}
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      # Pinned: a floating bunx would run new third-party code in every moku repo.
+      - run: bunx pkg-pr-new@0.0.88 publish --comment=update --packageManager=bun
