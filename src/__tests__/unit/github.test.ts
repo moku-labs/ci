@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { hasMainBranchRuleset, latestRunId, releaseUrl } from "../../lib/github";
+import {
+  activeBranchRulesetIds,
+  hasMainBranchRuleset,
+  latestRunId,
+  releaseUrl,
+  requiredCheckContexts,
+  withCentralRequiredChecks
+} from "../../lib/github";
 
 describe("hasMainBranchRuleset", () => {
   it("accepts an active branch ruleset", () => {
@@ -23,6 +30,72 @@ describe("hasMainBranchRuleset", () => {
   it("treats unparseable output as no ruleset", () => {
     expect(hasMainBranchRuleset("gh: Not Found")).toBe(false);
     expect(hasMainBranchRuleset("[]")).toBe(false);
+  });
+});
+
+describe("activeBranchRulesetIds", () => {
+  it("lists only active branch rulesets that carry an id", () => {
+    const payload = JSON.stringify([
+      { id: 1, target: "branch", enforcement: "active" },
+      { id: 2, target: "tag", enforcement: "active" },
+      { id: 3, target: "branch", enforcement: "disabled" },
+      { target: "branch", enforcement: "active" }
+    ]);
+
+    expect(activeBranchRulesetIds(payload)).toEqual([1]);
+  });
+});
+
+describe("requiredCheckContexts", () => {
+  it("reads the required contexts of one ruleset", () => {
+    const payload = JSON.stringify({
+      rules: [
+        { type: "deletion" },
+        {
+          type: "required_status_checks",
+          parameters: { required_status_checks: [{ context: "lint" }, { context: "ci / test" }] }
+        }
+      ]
+    });
+
+    expect(requiredCheckContexts(payload)).toEqual(["lint", "ci / test"]);
+  });
+
+  it("treats unparseable output as no required checks", () => {
+    expect(requiredCheckContexts("gh: Not Found")).toEqual([]);
+  });
+});
+
+describe("withCentralRequiredChecks", () => {
+  it("keeps the other rules and swaps in the central required checks", () => {
+    const existing = JSON.stringify({
+      rules: [
+        { type: "deletion" },
+        {
+          type: "required_status_checks",
+          parameters: { required_status_checks: [{ context: "lint" }] }
+        }
+      ]
+    });
+    const template = JSON.stringify({
+      rules: [
+        { type: "pull_request" },
+        {
+          type: "required_status_checks",
+          parameters: { required_status_checks: [{ context: "ci / lint" }] }
+        }
+      ]
+    });
+
+    expect(JSON.parse(withCentralRequiredChecks(existing, template))).toEqual({
+      rules: [
+        { type: "deletion" },
+        {
+          type: "required_status_checks",
+          parameters: { required_status_checks: [{ context: "ci / lint" }] }
+        }
+      ]
+    });
   });
 });
 

@@ -259,4 +259,35 @@ describe("runSetup — publish, tag, trust, ruleset", () => {
     );
     expect(test.exec.inputs.join("")).toContain('"name": "protect-main"');
   });
+
+  it("moves a legacy ruleset to the central checks with PUT, keeping its other rules", async () => {
+    const test = harness({
+      ...AUTHENTICATED,
+      "gh api repos/moku-labs/common/rulesets": JSON.stringify([
+        { id: 7, name: "protect-main", target: "branch", enforcement: "active" }
+      ]),
+      "gh api repos/moku-labs/common/rulesets/7": JSON.stringify({
+        rules: [
+          { type: "deletion" },
+          {
+            type: "required_status_checks",
+            parameters: { required_status_checks: [{ context: "lint" }] }
+          }
+        ]
+      })
+    });
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
+
+    expect(test.exec.captured).toContain(
+      "gh api repos/moku-labs/common/rulesets/7 --method PUT --input -"
+    );
+    expect(test.exec.captured).not.toContain(
+      "gh api repos/moku-labs/common/rulesets --method POST --input -"
+    );
+
+    const body = JSON.parse(test.exec.inputs.at(-1) ?? "{}") as { rules: { type: string }[] };
+    expect(body.rules.map(rule => rule.type)).toEqual(["deletion", "required_status_checks"]);
+    expect(test.exec.inputs.at(-1)).toContain("ci / lint");
+  });
 });

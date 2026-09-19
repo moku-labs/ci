@@ -10,7 +10,7 @@ import {
 } from "../../checks";
 import { LATEST_TAG_ARGS } from "../../lib/git";
 import { REQUIRED_SCRIPTS } from "../../lib/package-json";
-import { workflowTemplates } from "../../lib/templates";
+import { renderMainRuleset, workflowTemplates } from "../../lib/templates";
 import type { CheckContext } from "../../types";
 import { memoryFiles, type StubReply, stubExecutor } from "../helpers/ports";
 
@@ -209,6 +209,45 @@ describe("branchRulesetCheck", () => {
         "gh api repos/moku-labs/common/rulesets": JSON.stringify([
           { name: "protect-main", target: "branch", enforcement: "active" }
         ])
+      })
+    );
+
+    expect(result.status).toBe("pass");
+  });
+
+  it("warns when the ruleset still requires the legacy check names", async () => {
+    const result = await branchRulesetCheck.run(
+      contextWith({
+        "gh api repos/moku-labs/common/rulesets": JSON.stringify([
+          { id: 7, name: "protect-main", target: "branch", enforcement: "active" }
+        ]),
+        "gh api repos/moku-labs/common/rulesets/7": JSON.stringify({
+          rules: [
+            {
+              type: "required_status_checks",
+              parameters: {
+                required_status_checks: [{ context: "lint" }, { context: "ci / test" }]
+              }
+            }
+          ]
+        })
+      })
+    );
+
+    expect(result).toEqual({
+      status: "warn",
+      detail: "ruleset requires legacy checks: lint",
+      fix: "moku-release setup"
+    });
+  });
+
+  it("passes when the ruleset requires only the central checks", async () => {
+    const result = await branchRulesetCheck.run(
+      contextWith({
+        "gh api repos/moku-labs/common/rulesets": JSON.stringify([
+          { id: 7, name: "protect-main", target: "branch", enforcement: "active" }
+        ]),
+        "gh api repos/moku-labs/common/rulesets/7": renderMainRuleset()
       })
     );
 
