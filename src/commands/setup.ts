@@ -228,43 +228,54 @@ async function normalizeContract(setup: SetupRun, manifest: PackageManifest): Pr
 }
 
 /**
+ * Where the package stands on npm after the first-publish step: it was already there, this
+ * run put it there, or it is still missing (declined, handed to the owner, or failed).
+ *
+ * @example
+ * const state: PublishState = "absent";
+ */
+type PublishState = "present" | "published" | "absent";
+
+/**
  * Perform the very first publish, if the package has no registry presence yet. Stdio is
  * inherited so npm — not this CLI — prompts for an OTP.
  *
  * @param setup - The wizard state.
  * @param name - The package name.
  * @param version - The version about to be published.
- * @returns `true` when this run performed the first publish.
+ * @returns Where the package stands on npm after this step.
  * @example
- * await firstPublish(setup, "@moku-labs/common", "0.2.0");
+ * const state = await firstPublish(setup, "@moku-labs/common", "0.2.0");
  */
-async function firstPublish(setup: SetupRun, name: string, version: string): Promise<boolean> {
+async function firstPublish(setup: SetupRun, name: string, version: string): Promise<PublishState> {
   setup.ui.heading("First publish");
 
   const view = await setup.ctx.exec.capture("npm", ["view", name, "version"]);
   if (view.code === 0) {
     setup.ui.check(true, `${name}@${view.stdout.trim()} already on npm`);
-    return false;
+    return "present";
   }
 
   if (!(await setup.prompts.confirm(`Publish ${name}@${version} to npm now?`))) {
     setup.ui.check(false, "first publish skipped");
-    return false;
+    return "absent";
   }
-  if (deferred(setup, `run bun run build && npm publish --access public`)) return false;
+
+  // A dry run reports the publish as done, so the steps after it are still listed
+  if (deferred(setup, `run bun run build && npm publish --access public`)) return "published";
   if (needsOwner(setup, "first publish", "bun run build && npm publish --access public")) {
-    return false;
+    return "absent";
   }
 
   const built = await setup.ctx.exec.inherit("bun", ["run", "build"]);
   if (built !== 0) {
     setup.ui.error("build failed — not publishing");
-    return false;
+    return "absent";
   }
 
   const published = await setup.ctx.exec.inherit("npm", ["publish", "--access", "public"]);
   setup.ui.check(published === 0, `npm publish ${name}@${version}`);
-  return published === 0;
+  return published === 0 ? "published" : "absent";
 }
 
 /**
@@ -443,8 +454,14 @@ export async function runSetup(options: SetupOptions): Promise<number> {
 
   await writeWorkflows(setup);
   await normalizeContract(setup, manifest);
-  const justPublished = await firstPublish(setup, manifest.name, manifest.version);
-  await pushVersionTag(setup, manifest.version);
+  const published = await firstPublish(setup, manifest.name, manifest.version);
+
+  // A version tag says "this is on npm": never push one for a publish that did not happen
+  if (published === "absent") {
+    ui.heading("Tag");
+    ui.check(false, `v${manifest.version} not tagged, the package is not on npm yet`);
+  } else await pushVersionTag(setup, manifest.version);
+
   await registerTrustedPublisher(setup);
 
   // The ruleset is the only step that needs a resolvable GitHub slug.
@@ -457,7 +474,7 @@ export async function runSetup(options: SetupOptions): Promise<number> {
   const report = await runDoctor({ ctx: setup.ctx, ui });
 
   // The registry caches the 404 it gave before the publish, so doctor can still miss the package
-  if (justPublished) {
+  if (published === "published" && !setup.dryRun) {
     ui.info("published just now: npm can answer 404 for a few minutes, re-run release:doctor then");
   }
   return report.failed ? 1 : 0;
