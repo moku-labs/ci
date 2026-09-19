@@ -22,6 +22,7 @@ everything else lives here, once. Not a build tool and not a framework — it ca
 [Install](#install) ·
 [How it works](#how-it-works) ·
 [Workflows](#workflows) ·
+[PR previews](#pr-previews) ·
 [CLI](#cli) ·
 [The contract](#the-contract) ·
 [Versioning](#versioning) ·
@@ -93,7 +94,7 @@ flowchart LR
 
 | Workflow | Called from | Jobs | Inputs (all optional) |
 |---|---|---|---|
-| [`package-ci.yml`](.github/workflows/package-ci.yml) | [`examples/package/ci.yml`](examples/package/ci.yml) | `lint` · `types` · `test` · `build` | `runs_on`, `bun_version`, `validate` |
+| [`package-ci.yml`](.github/workflows/package-ci.yml) | [`examples/package/ci.yml`](examples/package/ci.yml) | `lint` · `types` · `test` · `build` · `preview` | `runs_on`, `bun_version`, `validate`, `preview` |
 | [`package-release.yml`](.github/workflows/package-release.yml) | [`examples/package/publish.yml`](examples/package/publish.yml) | `check` → `release` → `package` → `publish` | `release_type`, `publish`, `runs_on`, `bun_version`, `node_version`, `artifact_name`, `validate` |
 | [`app-deploy.yml`](.github/workflows/app-deploy.yml) | [`examples/app/ci.yml`](examples/app/ci.yml) | `validate` → `deploy` to Cloudflare | script names (`lint_script`, `build_script`, `deploy_script`, …) and two required secrets |
 | [`self-test.yml`](.github/workflows/self-test.yml) | this repo only | `actionlint` over workflows and examples | — |
@@ -109,12 +110,29 @@ flowchart LR
 > A Layer-3 app copies `examples/app/ci.yml` by hand and needs a `deploy` script. The CLI
 > sets up packages only.
 
+## PR previews
+
+Every pull request commit is published to [pkg.pr.new](https://pkg.pr.new) by the `preview`
+job. Nothing reaches npm and no token is in scope. The bot comments the install command on
+the PR.
+
+```sh
+bun add https://pkg.pr.new/@moku-labs/core@42   # 42 = PR number, a commit sha works too
+```
+
+| Rule | Where |
+|---|---|
+| The [pkg.pr.new GitHub App](https://github.com/apps/pkg-pr-new) must be installed on the repo. | once per org |
+| The package repo must be public. The consuming project may be private. | pkg.pr.new |
+| A preview URL never reaches `main`: the `lint` job and `doctor` both refuse it. | `package-ci.yml`, `preview-deps` |
+| `preview` is not a required check. Turn it off with `with: { preview: false }`. | caller `ci.yml` |
+
 ## CLI
 
 | Command | When | What it does |
 |---|---|---|
 | `bun run release:setup` | once per project | Idempotent wizard: workflows, script contract, first publish, first tag, trusted publisher, branch ruleset, then `doctor`. `--dry-run` prints every action and changes nothing. |
-| `bun run release:doctor` | any time | Changes nothing in the project; it only runs `git fetch --tags` first. Eleven checks, one line each, and the exact `fix:` command for every red line. `--json` for machines. |
+| `bun run release:doctor` | any time | Changes nothing in the project; it only runs `git fetch --tags` first. Twelve checks, one line each, and the exact `fix:` command for every red line. `--json` for machines. |
 | `bun run release <patch\|minor\|major\|prerelease>` | each release | Refuses unless the tree is clean and `HEAD == origin/main`. Dispatches `publish.yml`, watches the run, verifies the version and dist-tag on npm. |
 
 The scripts are plain aliases of the `moku-release` bin. Internals and the list of checks:

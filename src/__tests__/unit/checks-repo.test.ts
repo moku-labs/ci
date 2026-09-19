@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   branchRulesetCheck,
   packageContractCheck,
+  previewDepsCheck,
   repositoryUrlCheck,
   tagSyncCheck,
   workflowsCheck,
@@ -46,6 +47,10 @@ const withTagAndNpm = (tag: string, latest: string): CheckContext =>
 const thinWorkflows = (): Record<string, string> =>
   Object.fromEntries(workflowTemplates.map(template => [template.path, template.content]));
 
+const manifestWith = (tables: Record<string, Record<string, string>>): Record<string, string> => ({
+  "package.json": JSON.stringify({ name: "@moku-labs/common", ...tables })
+});
+
 describe("packageContractCheck", () => {
   it("passes for a manifest on contract", async () => {
     const result = await packageContractCheck.run(contextWith({}));
@@ -65,6 +70,49 @@ describe("packageContractCheck", () => {
 
   it("skips when package.json is unreadable", async () => {
     const result = await packageContractCheck.run(contextWith({}, { "package.json": "{" }));
+
+    expect(result.status).toBe("skip");
+  });
+});
+
+describe("previewDepsCheck", () => {
+  it("passes when every dependency comes from the registry", async () => {
+    const tree = manifestWith({ dependencies: { "@moku-labs/core": "1.2.3" } });
+    const result = await previewDepsCheck.run(contextWith({}, tree));
+
+    expect(result.status).toBe("pass");
+  });
+
+  it("passes for a manifest with no dependency tables", async () => {
+    const result = await previewDepsCheck.run(contextWith({}));
+
+    expect(result.status).toBe("pass");
+  });
+
+  it("fails naming every preview dependency, across tables", async () => {
+    const tree = manifestWith({
+      dependencies: { "@moku-labs/core": "https://pkg.pr.new/@moku-labs/core@42", left: "1.0.0" },
+      devDependencies: { "@moku-labs/common": "https://pkg.pr.new/@moku-labs/common@abc1234" }
+    });
+    const result = await previewDepsCheck.run(contextWith({}, tree));
+
+    expect(result.status).toBe("fail");
+    expect(result.detail).toBe("preview build of @moku-labs/core, @moku-labs/common");
+    expect(result.fix).toBe("release upstream, then: bun add @moku-labs/core @moku-labs/common");
+  });
+
+  it("finds a preview in peer and optional dependencies", async () => {
+    const tree = manifestWith({
+      peerDependencies: { a: "https://pkg.pr.new/a@1" },
+      optionalDependencies: { b: "https://pkg.pr.new/b@2" }
+    });
+    const result = await previewDepsCheck.run(contextWith({}, tree));
+
+    expect(result.detail).toBe("preview build of a, b");
+  });
+
+  it("skips when package.json is unreadable", async () => {
+    const result = await previewDepsCheck.run(contextWith({}, { "package.json": "{" }));
 
     expect(result.status).toBe("skip");
   });
