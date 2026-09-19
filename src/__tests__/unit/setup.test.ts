@@ -279,6 +279,35 @@ describe("runSetup — publish, tag, trust, ruleset", () => {
     );
   });
 
+  it("registers behind 2FA too: asks, then lets npm prompt for the OTP", async () => {
+    const test = harness({
+      ...AUTHENTICATED,
+      "npm trust list @moku-labs/common": { code: 1, stderr: "npm error code EOTP" }
+    });
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
+
+    expect(test.asked.some(question => question.includes("needs an OTP"))).toBe(true);
+    expect(test.exec.inherited).toContain(
+      "npm trust github @moku-labs/common --file publish.yml --repo moku-labs/common --allow-publish --yes"
+    );
+  });
+
+  it("does not register behind 2FA when the answer is no", async () => {
+    const test = harness(
+      {
+        ...AUTHENTICATED,
+        "npm trust list @moku-labs/common": { code: 1, stderr: "npm error code EOTP" }
+      },
+      {},
+      false
+    );
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
+
+    expect(test.exec.inherited.some(line => line.startsWith("npm trust github"))).toBe(false);
+  });
+
   it("applies the central branch ruleset through gh api, piped on stdin", async () => {
     const test = harness();
 

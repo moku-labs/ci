@@ -10,6 +10,7 @@
 import type { BrandConsole, BrandPrompts } from "@moku-labs/common/cli";
 import { branchRulesetCheck, ghAuthCheck, npmAuthCheck, trustedPublisherCheck } from "../checks";
 import { findStaleRuleset } from "../checks/branch-ruleset";
+import { TRUST_NEEDS_OTP, trustCommand } from "../checks/trusted-publisher";
 import { LATEST_TAG_ARGS, latestVersionTag, ownerRepoFrom } from "../lib/git";
 import { withCentralRequiredChecks } from "../lib/github";
 import {
@@ -21,7 +22,7 @@ import {
   repositoryUrlOf
 } from "../lib/package-json";
 import { isThinWorkflow, renderMainRuleset, workflowTemplates } from "../lib/templates";
-import type { CheckContext } from "../types";
+import type { CheckContext, CheckResult } from "../types";
 import { runDoctor } from "./doctor";
 
 /**
@@ -291,16 +292,57 @@ async function registerTrustedPublisher(setup: SetupRun): Promise<void> {
   setup.ui.heading("Trusted publisher");
 
   const result = await trustedPublisherCheck.run(setup.ctx);
-  if (result.status !== "fail" || result.fix === undefined) {
-    setup.ui.check(result.status === "pass", `${result.detail}`, result.fix);
+  if (result.status === "pass") {
+    setup.ui.check(true, result.detail);
     return;
   }
-  if (deferred(setup, result.fix)) return;
 
   // The check's fix IS the registration command — one definition, no drift.
-  const [command = "npm", ...args] = result.fix.split(" ");
+  const behindOtp = result.detail === TRUST_NEEDS_OTP;
+  const registration = behindOtp ? await registrationBehindOtp(setup) : failFix(result);
+  if (registration === undefined) {
+    setup.ui.check(false, result.detail, result.fix);
+    return;
+  }
+  if (deferred(setup, registration)) return;
+
+  const [command = "npm", ...args] = registration.split(" ");
   const code = await setup.ctx.exec.inherit(command, args);
-  setup.ui.check(code === 0, "trusted publisher registered");
+  setup.ui.check(code === 0, "trusted publisher registered", `verify: ${result.fix}`);
+}
+
+/**
+ * The fix of a failing result. A warn or a skip is not something the wizard may act on.
+ *
+ * @param result - The check result.
+ * @returns The fix command when the result is a failure.
+ * @example
+ * failFix({ status: "fail", detail: "…", fix: "npm trust github …" });
+ */
+function failFix(result: CheckResult): string | undefined {
+  return result.status === "fail" ? result.fix : undefined;
+}
+
+/**
+ * The registration command for an account behind 2FA. There the listing needs an OTP, so
+ * the check cannot tell "missing" from "registered"; the wizard asks, and npm — with stdio
+ * inherited — prompts for the OTP itself and refuses a duplicate.
+ *
+ * @param setup - The wizard state.
+ * @returns The command to run, or `undefined` when it cannot be built or was declined.
+ * @example
+ * const registration = await registrationBehindOtp(setup);
+ */
+async function registrationBehindOtp(setup: SetupRun): Promise<string | undefined> {
+  const manifest = await readManifest(setup.ctx.files);
+  const declared = manifest === undefined ? undefined : repositoryUrlOf(manifest);
+  const ownerRepo = declared === undefined ? undefined : ownerRepoFrom(declared);
+  if (!manifest?.name || ownerRepo === undefined) return undefined;
+
+  const approved = await setup.prompts.confirm(
+    "npm needs an OTP to list trusted publishers. Register publish.yml now?"
+  );
+  return approved ? trustCommand(manifest.name, ownerRepo) : undefined;
 }
 
 /**

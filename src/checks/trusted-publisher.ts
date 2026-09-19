@@ -14,6 +14,9 @@ import type { CheckResult, ReleaseCheck } from "../types";
 /** Basename npm registers the publisher against — the workflow file's name, not its path. */
 const PUBLISH_WORKFLOW_FILE = PUBLISH_WORKFLOW_PATH.split("/").pop() ?? "publish.yml";
 
+/** Detail of the result when the listing sits behind 2FA; `setup` offers to register anyway. */
+export const TRUST_NEEDS_OTP = "npm asks for an OTP, cannot verify from here";
+
 /**
  * Whether npm's output says the `trust` command itself does not exist.
  *
@@ -60,7 +63,7 @@ function isOtpRequired(output: string): boolean {
  * @example
  * trustCommand("@moku-labs/common", "moku-labs/common");
  */
-function trustCommand(name: string, ownerRepo: string): string {
+export function trustCommand(name: string, ownerRepo: string): string {
   return `npm trust github ${name} --file ${PUBLISH_WORKFLOW_FILE} --repo ${ownerRepo} --allow-publish --yes`;
 }
 
@@ -94,10 +97,7 @@ export const trustedPublisherCheck: ReleaseCheck = {
     }
     // Behind 2FA the listing wants an OTP: say so instead of reporting a missing registration
     if (isOtpRequired(`${listing.stdout}${listing.stderr}`)) {
-      return warn(
-        "npm asks for an OTP, cannot verify from here",
-        `npm trust list ${manifest.name}`
-      );
+      return warn(TRUST_NEEDS_OTP, `npm trust list ${manifest.name}`);
     }
     if (listing.code !== 0 || !listing.stdout.includes(PUBLISH_WORKFLOW_FILE)) {
       return fail("no trusted publisher registered", trustCommand(manifest.name, ownerRepo));
