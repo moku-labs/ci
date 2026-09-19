@@ -5,20 +5,66 @@
  * move through a PR, so a release always describes a reviewed state.
  */
 import { ownerRepoFrom } from "../lib/git";
-import { hasMainBranchRuleset } from "../lib/github";
+import { activeBranchRulesetIds, hasMainBranchRuleset, requiredCheckContexts } from "../lib/github";
 import { readManifest, repositoryUrlOf } from "../lib/package-json";
 import { pass, skip, warn } from "../lib/result";
-import type { CheckResult, ReleaseCheck } from "../types";
+import { renderMainRuleset } from "../lib/templates";
+import type { CheckContext, CheckResult, ReleaseCheck } from "../types";
 
-/** Verifies `gh api repos/{owner}/{repo}/rulesets` lists an active branch ruleset. */
+/**
+ * An active branch ruleset that still requires checks the central workflows never report.
+ *
+ * @example
+ * const stale: StaleRuleset = { id: 7, body: "{…}", legacy: ["lint"] };
+ */
+export type StaleRuleset = {
+  /** The ruleset id. */
+  id: number;
+  /** The full ruleset as `gh api` printed it. */
+  body: string;
+  /** The required contexts that are not central `ci / …` checks. */
+  legacy: string[];
+};
+
+/**
+ * Find the first active branch ruleset whose required checks are not the central ones. A
+ * legacy ruleset requires `lint`; the thin caller reports `ci / lint`, so no PR can merge.
+ *
+ * @param ctx - The injected ports.
+ * @param ownerRepo - The `owner/repo` slug.
+ * @param listing - Output of `gh api repos/{owner}/{repo}/rulesets`.
+ * @returns The stale ruleset, or `undefined` when every ruleset is on the central checks.
+ * @example
+ * const stale = await findStaleRuleset(ctx, "moku-labs/system", listing.stdout);
+ */
+export async function findStaleRuleset(
+  ctx: CheckContext,
+  ownerRepo: string,
+  listing: string
+): Promise<StaleRuleset | undefined> {
+  const central = new Set(requiredCheckContexts(renderMainRuleset()));
+
+  for (const id of activeBranchRulesetIds(listing)) {
+    const detail = await ctx.exec.capture("gh", ["api", `repos/${ownerRepo}/rulesets/${id}`]);
+    if (detail.code !== 0) continue;
+
+    const legacy = requiredCheckContexts(detail.stdout).filter(context => !central.has(context));
+    if (legacy.length > 0) return { id, body: detail.stdout, legacy };
+  }
+
+  return undefined;
+}
+
+/** Verifies `gh api repos/{owner}/{repo}/rulesets` lists an active, up-to-date branch ruleset. */
 export const branchRulesetCheck: ReleaseCheck = {
   id: "branch-ruleset",
   title: "branch ruleset on main",
   /**
-   * List the repository's rulesets and look for an active branch-targeting one.
+   * List the repository's rulesets, look for an active branch-targeting one, and make sure
+   * it does not require legacy check names.
    *
    * @param ctx - The injected ports.
-   * @returns Pass when one exists, warn when none does.
+   * @returns Pass when one exists on the central checks, warn otherwise.
    * @example
    * await branchRulesetCheck.run(ctx);
    */
@@ -33,6 +79,14 @@ export const branchRulesetCheck: ReleaseCheck = {
 
     if (!hasMainBranchRuleset(rulesets.stdout)) {
       return warn("main has no branch ruleset", "moku-release setup");
+    }
+
+    const stale = await findStaleRuleset(ctx, ownerRepo, rulesets.stdout);
+    if (stale !== undefined) {
+      return warn(
+        `ruleset requires legacy checks: ${stale.legacy.join(", ")}`,
+        "moku-release setup"
+      );
     }
 
     return pass("active branch ruleset present");

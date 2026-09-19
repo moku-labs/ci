@@ -9,7 +9,9 @@
  */
 import type { BrandConsole, BrandPrompts } from "@moku-labs/common/cli";
 import { branchRulesetCheck, ghAuthCheck, npmAuthCheck, trustedPublisherCheck } from "../checks";
+import { findStaleRuleset } from "../checks/branch-ruleset";
 import { ownerRepoFrom } from "../lib/git";
+import { withCentralRequiredChecks } from "../lib/github";
 import {
   formatManifest,
   MANIFEST_PATH,
@@ -266,6 +268,26 @@ async function applyBranchRuleset(setup: SetupRun, ownerRepo: string): Promise<v
     setup.ui.check(true, result.detail);
     return;
   }
+
+  // A legacy ruleset requires `lint`; the thin caller reports `ci / lint`. Move it over.
+  const listing = await setup.ctx.exec.capture("gh", ["api", `repos/${ownerRepo}/rulesets`]);
+  const stale = await findStaleRuleset(setup.ctx, ownerRepo, listing.stdout);
+  if (stale !== undefined) {
+    if (deferred(setup, `move ruleset ${stale.id} on ${ownerRepo} to the ci / … checks`)) return;
+
+    const updated = await setup.ctx.exec.capture(
+      "gh",
+      ["api", `repos/${ownerRepo}/rulesets/${stale.id}`, "--method", "PUT", "--input", "-"],
+      { input: withCentralRequiredChecks(stale.body, renderMainRuleset()) }
+    );
+    setup.ui.check(
+      updated.code === 0,
+      "branch ruleset updated",
+      updated.stderr.trim() || undefined
+    );
+    return;
+  }
+
   if (deferred(setup, `create the PR-only branch ruleset on ${ownerRepo}`)) return;
 
   const created = await setup.ctx.exec.capture(
