@@ -265,6 +265,23 @@ describe("runSetup — publish, tag, trust, ruleset", () => {
     expect(test.exec.captured.some(line => line.startsWith("git push origin main"))).toBe(false);
   });
 
+  it("pushes no tag when the first publish was declined", async () => {
+    const test = harness(AUTHENTICATED, {}, false);
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
+
+    expect(test.exec.captured).not.toContain("git tag -a v1.0.0 -m v1.0.0");
+    expect(test.lines.join("\n")).toContain("not tagged, the package is not on npm yet");
+  });
+
+  it("pushes no tag when an unattended run hands the publish to the owner", async () => {
+    const test = harness();
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts, unattended: true });
+
+    expect(test.exec.captured).not.toContain("git push origin refs/tags/v1.0.0");
+  });
+
   it("leaves an existing tag alone", async () => {
     const test = harness({ ...AUTHENTICATED, "git tag --list v1.0.0": "v1.0.0\n" });
 
