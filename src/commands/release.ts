@@ -229,8 +229,7 @@ export async function runRelease(options: ReleaseOptions): Promise<number> {
     return 1;
   }
 
-  // The preflight compares against the remote, so refresh it first.
-  await ctx.exec.capture("git", ["fetch", "--tags", "--prune"]);
+  // The preflight compares against the remote; `runDoctor` refreshes it first.
   if (!(await preflight(ctx, ui))) return 1;
 
   const declared = repositoryUrlOf(manifest);

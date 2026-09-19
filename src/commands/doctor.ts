@@ -121,6 +121,11 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   const { ctx, ui, json = false, checks = allChecks } = options;
   const entries: DoctorEntry[] = [];
 
+  // Tags cut by CI exist only on the remote until fetched; without this the tag-sync check
+  // reports "npm is AHEAD of the tag" right after every release. Offline, the fetch fails
+  // quietly and the checks judge the refs that are here.
+  await ctx.exec.capture("git", ["fetch", "--tags", "--prune"]);
+
   for (const check of checks) entries.push(await evaluate(check, ctx));
   const failed = entries.some(entry => entry.status === "fail");
 

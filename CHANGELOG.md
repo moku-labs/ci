@@ -11,6 +11,8 @@ immutable `v1.x.y` tag.
 - `moku-release release` watched the run of the release before when GitHub had not listed the
   new run yet. It now remembers the newest run before the dispatch and waits for a different one.
 - The registry wait is ten minutes instead of two; the first live release needed three.
+- `doctor` fetches tags before it compares them with npm. Right after a release it reported
+  "npm is AHEAD of the tag" because the tag cut by CI was not local yet.
 
 ### Docs
 
