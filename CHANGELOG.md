@@ -4,6 +4,15 @@ All notable changes to the reusable workflows. This repo follows the versioning 
 [README.md](README.md#versioning-policy): `v1` is a moving major tag, every change also gets an
 immutable `v1.x.y` tag.
 
+## [Unreleased]
+
+### Added
+
+- `moku-release` CLI (`setup`, `doctor`, `<patch|minor|major|prerelease>`), published as
+  `@moku-labs/ci`. Moved here from moku-labs/common#4. It reads `examples/package/*.yml` and
+  `rulesets/main.json` from its own package instead of carrying string copies.
+- `ci.yml` and `publish.yml`: this repository calls its own reusable workflows.
+
 ## [1.0.0] — 2026-09-19
 
 Initial extraction. Consolidates seven drifted copies of `ci.yml` and six of `publish.yml`
