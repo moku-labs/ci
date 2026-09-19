@@ -114,7 +114,7 @@ flowchart LR
 | Command | When | What it does |
 |---|---|---|
 | `bun run release:setup` | once per project | Idempotent wizard: workflows, script contract, first publish, first tag, trusted publisher, branch ruleset, then `doctor`. `--dry-run` prints every action and changes nothing. |
-| `bun run release:doctor` | any time | Read-only. Eleven checks, one line each, and the exact `fix:` command for every red line. `--json` for machines. |
+| `bun run release:doctor` | any time | Changes nothing in the project; it only runs `git fetch --tags` first. Eleven checks, one line each, and the exact `fix:` command for every red line. `--json` for machines. |
 | `bun run release <patch\|minor\|major\|prerelease>` | each release | Refuses unless the tree is clean and `HEAD == origin/main`. Dispatches `publish.yml`, watches the run, verifies the version and dist-tag on npm. |
 
 The scripts are plain aliases of the `moku-release` bin. Internals and the list of checks:

@@ -31,6 +31,44 @@ describe("runDoctor", () => {
     expect(lines[0]).toContain("a — fine");
   });
 
+  it("fetches tags before the first check, so a tag cut by CI is already here", async () => {
+    const exec = stubExecutor();
+    const seen: string[] = [];
+    const probe: ReleaseCheck = {
+      id: "probe",
+      title: "probe",
+      async run() {
+        seen.push(...exec.captured);
+        return pass("fine");
+      }
+    };
+    const { options } = captureConsole();
+
+    await runDoctor({
+      ctx: { ...context, exec },
+      ui: createBrandConsole(options),
+      checks: [probe]
+    });
+
+    expect(seen).toEqual(["git fetch --tags --prune"]);
+  });
+
+  it("still reports when the fetch fails, as it does offline", async () => {
+    const exec = stubExecutor({
+      "git fetch": { code: 128, stdout: "", stderr: "could not resolve host" }
+    });
+    const { options } = captureConsole();
+
+    const report = await runDoctor({
+      ctx: { ...context, exec },
+      ui: createBrandConsole(options),
+      checks: [check("a", pass("fine"))]
+    });
+
+    expect(report.failed).toBe(false);
+    expect(report.entries).toHaveLength(1);
+  });
+
   it("is clean when nothing fails — warn and skip do not block", async () => {
     const { options } = captureConsole();
     const checks = [check("a", warn("meh", "do x")), check("b", skip("n/a"))];
