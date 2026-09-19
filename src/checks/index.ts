@@ -13,6 +13,7 @@ import { npmAuthCheck } from "./npm-auth";
 import { npmPackageCheck } from "./npm-package";
 import { npmVersionCheck } from "./npm-version";
 import { packageContractCheck } from "./package-contract";
+import { previewDepsCheck } from "./preview-deps";
 import { repositoryUrlCheck } from "./repository-url";
 import { tagSyncCheck } from "./tag-sync";
 import { trustedPublisherCheck } from "./trusted-publisher";
@@ -25,6 +26,7 @@ export const allChecks: readonly ReleaseCheck[] = [
   npmAuthCheck,
   npmVersionCheck,
   packageContractCheck,
+  previewDepsCheck,
   repositoryUrlCheck,
   workflowsCheck,
   npmPackageCheck,
@@ -40,6 +42,7 @@ export { npmAuthCheck } from "./npm-auth";
 export { npmPackageCheck } from "./npm-package";
 export { npmVersionCheck } from "./npm-version";
 export { packageContractCheck } from "./package-contract";
+export { previewDepsCheck } from "./preview-deps";
 export { repositoryUrlCheck } from "./repository-url";
 export { tagSyncCheck } from "./tag-sync";
 export { trustedPublisherCheck } from "./trusted-publisher";
