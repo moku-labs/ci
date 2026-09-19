@@ -240,6 +240,22 @@ describe("runSetup — publish, tag, trust, ruleset", () => {
     expect(test.exec.inherited).toContain("npm publish --access public");
   });
 
+  it("says the registry may lag right after a first publish", async () => {
+    const test = harness();
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
+
+    expect(test.lines.join("\n")).toContain("published just now");
+  });
+
+  it("says nothing about lag when the package was already on npm", async () => {
+    const test = harness({ ...AUTHENTICATED, "npm view @moku-labs/common version": "1.0.0\n" });
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
+
+    expect(test.lines.join("\n")).not.toContain("published just now");
+  });
+
   it("pushes only the version tag, never the branch", async () => {
     const test = harness();
 

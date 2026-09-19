@@ -123,6 +123,68 @@ function isAsciiOnly(text: string): boolean {
 }
 
 /**
+ * The one-line form a top-level value had in the source, e.g. `["dist", "LICENSE"]`.
+ *
+ * @param source - The original file contents.
+ * @param key - The top-level key to look up.
+ * @returns The inline text, or `undefined` when the value spanned several lines or is absent.
+ * @example
+ * inlineValueOf('{\n  "files": ["dist"],\n}', "files"); // '["dist"]'
+ */
+function inlineValueOf(source: string, key: string): string | undefined {
+  const prefix = `  ${JSON.stringify(key)}: `;
+  const line = source.split("\n").find(candidate => candidate.startsWith(prefix));
+  if (line === undefined) return undefined;
+
+  const value = line.slice(prefix.length).replace(/,\s*$/, "");
+  return /^[[{].*[\]}]$/.test(value) ? value : undefined;
+}
+
+/**
+ * Put back the one-line objects and arrays the source had. Formatters such as biome keep a
+ * short `"files": ["dist"]` on one line; `JSON.stringify` expands it, and an untouched value
+ * then shows up as changed lines in the diff. Only top-level, unchanged values are restored.
+ *
+ * @param manifest - The manifest being written.
+ * @param expanded - Its `JSON.stringify` rendering.
+ * @param source - The original file contents.
+ * @returns The rendering with the untouched inline values restored.
+ * @example
+ * keepInlineValues({ files: ["dist"] }, '{\n  "files": [\n    "dist"\n  ]\n}\n', source);
+ */
+function keepInlineValues(manifest: PackageManifest, expanded: string, source: string): string {
+  let text = expanded;
+
+  for (const [key, value] of Object.entries(manifest)) {
+    const inline = inlineValueOf(source, key);
+    if (inline === undefined || parseManifestValue(inline) !== JSON.stringify(value)) continue;
+
+    // Same value, different layout: swap the expanded block for the line the package wrote
+    const block = JSON.stringify(value, undefined, 2).replaceAll("\n", "\n  ");
+    const label = `  ${JSON.stringify(key)}: `;
+    text = text.replace(`${label}${block}`, () => `${label}${inline}`);
+  }
+
+  return text;
+}
+
+/**
+ * The canonical JSON of an inline value, for comparing it with the value being written.
+ *
+ * @param inline - The one-line JSON text.
+ * @returns Its compact re-serialization, or `undefined` when it does not parse.
+ * @example
+ * parseManifestValue('["dist", "LICENSE"]'); // '["dist","LICENSE"]'
+ */
+function parseManifestValue(inline: string): string | undefined {
+  try {
+    return JSON.stringify(JSON.parse(inline));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Render a manifest the way npm itself writes one: two-space JSON with a trailing newline.
  * A source file that was ASCII-only stays ASCII-only, so an escaped dash the package chose
  * does not show up as a changed line in the diff.
@@ -134,8 +196,11 @@ function isAsciiOnly(text: string): boolean {
  * await files.write("package.json", formatManifest(manifest, source));
  */
 export function formatManifest(manifest: PackageManifest, source?: string): string {
-  const text = `${JSON.stringify(manifest, undefined, 2)}\n`;
-  if (source === undefined || !isAsciiOnly(source)) return text;
+  const expanded = `${JSON.stringify(manifest, undefined, 2)}\n`;
+  if (source === undefined) return expanded;
+
+  const text = keepInlineValues(manifest, expanded, source);
+  if (!isAsciiOnly(source)) return text;
 
   return text.replaceAll(
     new RegExp(NON_ASCII, "g"),

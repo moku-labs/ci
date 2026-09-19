@@ -214,7 +214,7 @@ async function normalizeContract(setup: SetupRun, manifest: PackageManifest): Pr
  * @param setup - The wizard state.
  * @param name - The package name.
  * @param version - The version about to be published.
- * @returns `true` when the package exists on npm after this step.
+ * @returns `true` when this run performed the first publish.
  * @example
  * await firstPublish(setup, "@moku-labs/common", "0.2.0");
  */
@@ -224,7 +224,7 @@ async function firstPublish(setup: SetupRun, name: string, version: string): Pro
   const view = await setup.ctx.exec.capture("npm", ["view", name, "version"]);
   if (view.code === 0) {
     setup.ui.check(true, `${name}@${view.stdout.trim()} already on npm`);
-    return true;
+    return false;
   }
 
   if (!(await setup.prompts.confirm(`Publish ${name}@${version} to npm now?`))) {
@@ -308,7 +308,8 @@ async function registerTrustedPublisher(setup: SetupRun): Promise<void> {
 
   const [command = "npm", ...args] = registration.split(" ");
   const code = await setup.ctx.exec.inherit(command, args);
-  setup.ui.check(code === 0, "trusted publisher registered", `verify: ${result.fix}`);
+  const hint = code === 0 ? undefined : `verify: ${result.fix}`;
+  setup.ui.check(code === 0, "trusted publisher registered", hint);
 }
 
 /**
@@ -418,7 +419,7 @@ export async function runSetup(options: SetupOptions): Promise<number> {
 
   await writeWorkflows(setup);
   await normalizeContract(setup, manifest);
-  await firstPublish(setup, manifest.name, manifest.version);
+  const justPublished = await firstPublish(setup, manifest.name, manifest.version);
   await pushVersionTag(setup, manifest.version);
   await registerTrustedPublisher(setup);
 
@@ -430,5 +431,10 @@ export async function runSetup(options: SetupOptions): Promise<number> {
 
   ui.heading("Doctor");
   const report = await runDoctor({ ctx: setup.ctx, ui });
+
+  // The registry caches the 404 it gave before the publish, so doctor can still miss the package
+  if (justPublished) {
+    ui.info("published just now: npm can answer 404 for a few minutes, re-run release:doctor then");
+  }
   return report.failed ? 1 : 0;
 }
