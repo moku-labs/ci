@@ -6,6 +6,13 @@ immutable `v1.x.y` tag.
 
 ## [Unreleased]
 
+### Added
+
+- `package-ci.yml`: job `preview` publishes every pull request commit to pkg.pr.new, and the
+  new input `preview` (default `true`) turns it off. Needs the pkg.pr.new GitHub App.
+- `package-ci.yml`: the `lint` job fails when `package.json` depends on a `pkg.pr.new` URL.
+- `doctor` check `preview-deps`: the same rule locally, blocking in the release preflight.
+
 ### Fixed
 
 - `moku-release release` watched the run of the release before when GitHub had not listed the

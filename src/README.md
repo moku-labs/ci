@@ -48,7 +48,7 @@ Normalization is **additive and idempotent**: it fills what is absent and never 
 | Command | Mutates | What it does |
 |---|---|---|
 | `setup` | yes (each step confirmed) | Verify the two human-only prerequisites → write the thin workflows → normalize `package.json` → first publish → tag + push that tag → register the trusted publisher → apply the branch ruleset → run `doctor`. |
-| `doctor [--json]` | **never** | Run all 11 checks, one line each, a `fix:` line for every non-pass. Exit `0` when nothing fails, `1` otherwise. |
+| `doctor [--json]` | **never** | Run all 12 checks, one line each, a `fix:` line for every non-pass. Exit `0` when nothing fails, `1` otherwise. |
 | `<patch\|minor\|major\|prerelease>` | yes | Strict preflight → `gh workflow run publish.yml` → `gh run watch --exit-status` → poll npm until the dist-tag actually moves → branded summary (version, tag, npm URL, release URL). |
 
 Both `setup` and the release command accept `--dry-run`, which prints every action and mutates nothing.
@@ -61,6 +61,7 @@ Both `setup` and the release command accept `--dry-run`, which prints every acti
 | `npm-auth` | fail | `npm whoami`. |
 | `npm-version` | fail | `npm >= 11.5.1` — the Trusted Publishing floor. |
 | `package-contract` | fail | Every missing script/field, named individually. |
+| `preview-deps` | fail | No dependency range is a `pkg.pr.new` preview URL; every offender named. The `lint` job refuses the same on a PR. |
 | `repository-url` | fail | `repository.url` vs `git remote get-url origin`, canonically. |
 | `workflows` | fail / warn | Both workflows exist (fail) and are pinned to `moku-labs/ci/…@v1` (warn: *legacy workflow, run release:setup to migrate*). |
 | `npm-package` | warn | `npm view <name> version` — *first publish not done yet*. |
