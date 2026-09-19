@@ -47,8 +47,8 @@
     "lint:fix": "biome check --write . && eslint --fix .",
     "format": "biome format --write .",
     "test": "vitest run",
-    "release:setup": "moku-release setup",
-    "release:doctor": "moku-release doctor",
-    "release": "moku-release"
+    "release:setup": "bun run build && node dist/release.mjs setup",
+    "release:doctor": "bun run build && node dist/release.mjs doctor",
+    "release": "bun run build && node dist/release.mjs"
   }
 }
