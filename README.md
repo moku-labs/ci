@@ -45,9 +45,11 @@ registers the trusted publisher and applies the branch ruleset. Run it again any
 only does what is still missing.
 
 > [!NOTE]
-> **Status: `1.x`, early.** `package-ci.yml`, `package-release.yml` and `moku-release release`
-> ship this package itself: `1.1.1` was the first live release, tokenless and with provenance.
-> `moku-release setup` has passed dry-run and unit tests only.
+> **Status: `1.x`, in use.** All eight moku packages — `core`, `common`, `web`, `worker`, `room`,
+> `system`, `ai`, `native` — run `package-ci.yml` and `package-release.yml` from `@v1`, and each
+> has shipped a tokenless release with provenance through them. `moku-release setup` did every
+> one of those migrations live, including two first publishes behind 2FA.
+> `app-deploy.yml` has no live user yet.
 
 > [!IMPORTANT]
 > Two steps are yours alone. The CLI never handles a credential, and there is no `NPM_TOKEN`
@@ -60,7 +62,7 @@ only does what is still missing.
 
 ## Why @moku-labs/ci
 
-- **One copy of the pipeline.** Seven repos had seven different `ci.yml` and six different
+- **One copy of the pipeline.** Eight packages had eight different `ci.yml` and eight different
   `publish.yml`. A fix now lands here and reaches every project through the `@v1` tag.
 - **Scripts are the interface, not tools.** The workflows call `bun run lint`, never `biome`.
   A project with special needs changes its own script, not the central YAML.
@@ -156,7 +158,7 @@ bun add https://pkg.pr.new/@moku-labs/core@42   # 42 = PR number, a commit sha w
 
 | Command | When | What it does |
 |---|---|---|
-| `bun run release:setup` | once per project | Idempotent wizard: workflows, script contract, first publish, first tag, trusted publisher, branch ruleset, then `doctor`. `--dry-run` prints every action and changes nothing. |
+| `bun run release:setup` | once per project | Idempotent wizard: workflows, script contract, first publish, first tag, trusted publisher, branch ruleset, then `doctor`. `--dry-run` prints every action, changes nothing and asks nothing. `--yes` answers every confirmation for an agent or CI; a step that needs your npm OTP is then printed, not run. |
 | `bun run release:doctor` | any time | Changes nothing in the project; it only runs `git fetch --tags` first. Twelve checks, one line each, and the exact `fix:` command for every red line. `--json` for machines. |
 | `bun run release <patch\|minor\|major\|prerelease>` | each release | Refuses unless the tree is clean and `HEAD == origin/main`. Dispatches `publish.yml`, watches the run, verifies the version and dist-tag on npm. |
 
