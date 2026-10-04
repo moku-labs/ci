@@ -40,9 +40,9 @@ bun add -d @moku-labs/ci
 bun run release:setup
 ```
 
-`setup` writes the two workflow files, adds the missing scripts, does the first publish,
-registers the trusted publisher and applies the branch ruleset. Run it again any time — it
-only does what is still missing.
+`setup` writes the two workflow files and the Dependabot files, adds the missing scripts,
+does the first publish, registers the trusted publisher, applies the branch ruleset and
+allows auto-merge. Run it again any time — it only does what is still missing.
 
 > [!NOTE]
 > **Status: `1.x`, in use.** All eight moku packages — `core`, `common`, `web`, `worker`, `room`,
@@ -108,10 +108,13 @@ flowchart LR
 |---|---|
 | [`examples/package/publish.local-publish.yml`](examples/package/publish.local-publish.yml) | Fallback: publish from the project's own job. Use it only if the central publish fails npm auth. |
 | [`rulesets/main.json`](rulesets/main.json) | Branch ruleset for `main`: PR only, no force-push, the four `ci / …` checks required. |
+| [`examples/dependabot.yml`](examples/dependabot.yml) | Dependabot config: one grouped PR a day for `@moku-labs/*` only. `setup` writes it to `.github/dependabot.yml`. |
+| [`examples/package/dependabot-automerge.yml`](examples/package/dependabot-automerge.yml) | Turns on auto-merge for a Dependabot PR; the ruleset checks stay the gate. `setup` writes it and allows auto-merge on the repo. |
 
 > [!TIP]
-> A Layer-3 app copies `examples/app/ci.yml` by hand and needs a `deploy` script. The CLI
-> sets up packages only.
+> A Layer-3 app copies `examples/app/ci.yml` and `examples/dependabot.yml` by hand and needs
+> a `deploy` script. An app merges Dependabot PRs by hand, because the merge runs the deploy.
+> The CLI sets up packages only.
 
 ## Project checks
 
@@ -158,7 +161,7 @@ bun add https://pkg.pr.new/@moku-labs/core@42   # 42 = PR number, a commit sha w
 
 | Command | When | What it does |
 |---|---|---|
-| `bun run release:setup` | once per project | Idempotent wizard: workflows, script contract, first publish, first tag, trusted publisher, branch ruleset, then `doctor`. `--dry-run` prints every action, changes nothing and asks nothing. `--yes` answers every confirmation for an agent or CI; a step that needs your npm OTP is then printed, not run. |
+| `bun run release:setup` | once per project | Idempotent wizard: workflows, Dependabot, script contract, first publish, first tag, trusted publisher, branch ruleset, auto-merge, then `doctor`. `--dry-run` prints every action, changes nothing and asks nothing. `--yes` answers every confirmation for an agent or CI; a step that needs your npm OTP is then printed, not run. |
 | `bun run release:doctor` | any time | Changes nothing in the project; it only runs `git fetch --tags` first. Twelve checks, one line each, and the exact `fix:` command for every red line. `--json` for machines. |
 | `bun run release <patch\|minor\|major\|prerelease>` | each release | Refuses unless the tree is clean and `HEAD == origin/main`. Dispatches `publish.yml`, watches the run, verifies the version and dist-tag on npm. |
 

@@ -21,7 +21,12 @@ import {
   readManifest,
   repositoryUrlOf
 } from "../lib/package-json";
-import { isThinWorkflow, renderMainRuleset, workflowTemplates } from "../lib/templates";
+import {
+  dependabotTemplates,
+  isThinWorkflow,
+  renderMainRuleset,
+  workflowTemplates
+} from "../lib/templates";
 import type { CheckContext, CheckResult } from "../types";
 import { runDoctor } from "./doctor";
 
@@ -190,6 +195,36 @@ async function writeWorkflows(setup: SetupRun): Promise<void> {
         ? !deferred(setup, `write ${template.path}`)
         : await clearExistingWorkflow(setup, template);
     if (!cleared) continue;
+
+    await setup.ctx.files.write(template.path, template.content);
+    setup.ui.check(true, `${template.path} written`);
+  }
+}
+
+/**
+ * Write the Dependabot config and its automerge workflow. A missing file is written; a
+ * file that differs is the project's own config and is left alone, without asking.
+ *
+ * @param setup - The wizard state.
+ * @returns Nothing.
+ * @example
+ * await writeDependabot(setup);
+ */
+async function writeDependabot(setup: SetupRun): Promise<void> {
+  setup.ui.heading("Dependabot");
+
+  for (const template of dependabotTemplates) {
+    const existing = await setup.ctx.files.read(template.path);
+
+    if (existing === template.content) {
+      setup.ui.check(true, `${template.path} up to date`);
+      continue;
+    }
+    if (existing !== undefined) {
+      setup.ui.check(true, `${template.path} is the project's own, left as is`);
+      continue;
+    }
+    if (deferred(setup, `write ${template.path}`)) continue;
 
     await setup.ctx.files.write(template.path, template.content);
     setup.ui.check(true, `${template.path} written`);
@@ -447,6 +482,42 @@ async function applyBranchRuleset(setup: SetupRun, ownerRepo: string): Promise<v
 }
 
 /**
+ * Turn on the repo setting the automerge workflow needs. Without it `gh pr merge --auto`
+ * fails and every Dependabot PR waits for a manual merge.
+ *
+ * @param setup - The wizard state.
+ * @param ownerRepo - The `owner/repo` slug.
+ * @returns Nothing.
+ * @example
+ * await enableAutoMerge(setup, "moku-labs/common");
+ */
+async function enableAutoMerge(setup: SetupRun, ownerRepo: string): Promise<void> {
+  setup.ui.heading("Auto-merge");
+
+  const current = await setup.ctx.exec.capture("gh", [
+    "api",
+    `repos/${ownerRepo}`,
+    "--jq",
+    ".allow_auto_merge"
+  ]);
+  if (current.code === 0 && current.stdout.trim() === "true") {
+    setup.ui.check(true, "auto-merge already allowed");
+    return;
+  }
+  if (deferred(setup, `allow auto-merge on ${ownerRepo}`)) return;
+
+  const updated = await setup.ctx.exec.capture("gh", [
+    "api",
+    `repos/${ownerRepo}`,
+    "--method",
+    "PATCH",
+    "-F",
+    "allow_auto_merge=true"
+  ]);
+  setup.ui.check(updated.code === 0, "auto-merge allowed", updated.stderr.trim() || undefined);
+}
+
+/**
  * Run the whole wizard. Every step is skippable, idempotent, and re-runnable; the last one
  * is always `doctor`, so the wizard's own verdict is the same report the operator gets
  * from `release:doctor`.
@@ -470,6 +541,7 @@ export async function runSetup(options: SetupOptions): Promise<number> {
   }
 
   await writeWorkflows(setup);
+  await writeDependabot(setup);
   await normalizeContract(setup, manifest);
   const published = await firstPublish(setup, manifest.name, manifest.version);
 
@@ -481,11 +553,15 @@ export async function runSetup(options: SetupOptions): Promise<number> {
 
   await registerTrustedPublisher(setup);
 
-  // The ruleset is the only step that needs a resolvable GitHub slug.
+  // The ruleset and auto-merge are the only steps that need a resolvable GitHub slug.
   const declared = repositoryUrlOf(manifest);
   const ownerRepo = declared === undefined ? undefined : ownerRepoFrom(declared);
-  if (ownerRepo === undefined) ui.warn("no GitHub owner/repo — skipping the branch ruleset");
-  else await applyBranchRuleset(setup, ownerRepo);
+  if (ownerRepo === undefined) {
+    ui.warn("no GitHub owner/repo — skipping the branch ruleset and auto-merge");
+  } else {
+    await applyBranchRuleset(setup, ownerRepo);
+    await enableAutoMerge(setup, ownerRepo);
+  }
 
   ui.heading("Doctor");
   const report = await runDoctor({ ctx: setup.ctx, ui });

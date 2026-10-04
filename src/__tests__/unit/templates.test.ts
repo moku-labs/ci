@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isThinWorkflow, renderMainRuleset, workflowTemplates } from "../../lib/templates";
+import {
+  dependabotTemplates,
+  isThinWorkflow,
+  renderMainRuleset,
+  workflowTemplates
+} from "../../lib/templates";
 import { CI_WORKFLOW, CI_WORKFLOW_PATH } from "../../templates/ci";
 import { PUBLISH_WORKFLOW, PUBLISH_WORKFLOW_PATH } from "../../templates/publish";
 
@@ -51,6 +56,29 @@ describe("workflow templates", () => {
   it("exposes each body at its own path constant", () => {
     expect(CI_WORKFLOW_PATH).toBe(ciTemplate?.path);
     expect(PUBLISH_WORKFLOW_PATH).toBe(publishTemplate?.path);
+  });
+});
+
+describe("dependabot templates", () => {
+  const [config, automerge] = dependabotTemplates;
+
+  it("writes the config and the automerge workflow at the paths GitHub reads", () => {
+    expect(dependabotTemplates).toHaveLength(2);
+    expect(config?.path).toBe(".github/dependabot.yml");
+    expect(automerge?.path).toBe(".github/workflows/dependabot-automerge.yml");
+  });
+
+  it("watches only @moku-labs/*, grouped into one PR", () => {
+    expect(config?.content).toContain('package-ecosystem: "bun"');
+    expect(config?.content).toContain('- dependency-name: "@moku-labs/*"');
+    expect(config?.content).toContain("groups:\n      moku:");
+  });
+
+  it("auto-merges only Dependabot PRs, and leaves the gate to the ruleset", () => {
+    expect(automerge?.content).toContain(
+      "github.event.pull_request.user.login == 'dependabot[bot]'"
+    );
+    expect(automerge?.content).toContain('gh pr merge --auto --squash "$PR_URL"');
   });
 });
 
