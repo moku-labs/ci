@@ -1,0 +1,21 @@
+name: Dependabot automerge
+
+# Turns on auto-merge for a Dependabot PR. The branch ruleset stays the gate: the merge
+# waits for ci / lint, ci / types, ci / test and ci / build. Needs the repo setting
+# allow_auto_merge, which `moku-release setup` turns on.
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge once required checks pass
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

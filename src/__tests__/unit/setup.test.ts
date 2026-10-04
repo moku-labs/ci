@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { runSetup } from "../../commands/setup";
 import { LATEST_TAG_ARGS } from "../../lib/git";
 import { REQUIRED_SCRIPTS } from "../../lib/package-json";
-import { workflowTemplates } from "../../lib/templates";
+import { dependabotTemplates, workflowTemplates } from "../../lib/templates";
 import type { CheckContext } from "../../types";
 import {
   captureConsole,
@@ -141,7 +141,10 @@ describe("runSetup — workflows", () => {
 
   it("re-running writes nothing — the second pass is checkmarks", async () => {
     const tree = Object.fromEntries(
-      workflowTemplates.map(template => [template.path, template.content])
+      [...workflowTemplates, ...dependabotTemplates].map(template => [
+        template.path,
+        template.content
+      ])
     );
     const test = harness(AUTHENTICATED, tree);
 
@@ -246,6 +249,69 @@ describe("runSetup — package.json", () => {
     await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
 
     expect(test.files.tree["package.json"]).toBe(bare);
+  });
+});
+
+describe("runSetup — Dependabot and auto-merge", () => {
+  const [configTemplate] = dependabotTemplates;
+  if (!configTemplate) throw new Error("expected a dependabot config template");
+
+  it("writes the Dependabot config and its automerge workflow when neither exists", async () => {
+    const test = harness();
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
+
+    for (const template of dependabotTemplates) {
+      expect(test.files.tree[template.path]).toBe(template.content);
+    }
+  });
+
+  it("announces the Dependabot writes under --dry-run", async () => {
+    const test = harness();
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts, dryRun: true });
+
+    const output = test.lines.join("\n");
+    for (const template of dependabotTemplates)
+      expect(output).toContain(`would write ${template.path}`);
+  });
+
+  it("leaves the project's own Dependabot config alone, without asking", async () => {
+    const own = "version: 2\nupdates: []\n";
+    const test = harness(AUTHENTICATED, { [configTemplate.path]: own });
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
+
+    expect(test.files.tree[configTemplate.path]).toBe(own);
+    expect(test.files.written).not.toContain(configTemplate.path);
+    expect(test.asked.some(question => question.includes(configTemplate.path))).toBe(false);
+  });
+
+  it("allows auto-merge on the repo when it is off", async () => {
+    const test = harness({
+      ...AUTHENTICATED,
+      "gh api repos/moku-labs/common --jq .allow_auto_merge": "false\n",
+      "gh api repos/moku-labs/common --method PATCH -F allow_auto_merge=true": "{}"
+    });
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
+
+    expect(test.exec.captured).toContain(
+      "gh api repos/moku-labs/common --method PATCH -F allow_auto_merge=true"
+    );
+    expect(test.lines.join("\n")).toContain("auto-merge allowed");
+  });
+
+  it("changes nothing when auto-merge is already allowed", async () => {
+    const test = harness({
+      ...AUTHENTICATED,
+      "gh api repos/moku-labs/common --jq .allow_auto_merge": "true\n"
+    });
+
+    await runSetup({ ctx: test.ctx, ui: test.ui, prompts: test.prompts });
+
+    expect(test.exec.captured.some(line => line.includes("--method PATCH"))).toBe(false);
+    expect(test.lines.join("\n")).toContain("auto-merge already allowed");
   });
 });
 

@@ -11,6 +11,12 @@
  */
 import { CI_WORKFLOW, CI_WORKFLOW_PATH, CI_WORKFLOW_REF } from "../templates/ci";
 import {
+  DEPENDABOT_AUTOMERGE,
+  DEPENDABOT_AUTOMERGE_PATH,
+  DEPENDABOT_CONFIG,
+  DEPENDABOT_CONFIG_PATH
+} from "../templates/dependabot";
+import {
   PUBLISH_WORKFLOW,
   PUBLISH_WORKFLOW_PATH,
   PUBLISH_WORKFLOW_REF
@@ -38,6 +44,27 @@ export type WorkflowTemplate = {
 export const workflowTemplates: readonly WorkflowTemplate[] = [
   { path: CI_WORKFLOW_PATH, content: CI_WORKFLOW, ref: CI_WORKFLOW_REF },
   { path: PUBLISH_WORKFLOW_PATH, content: PUBLISH_WORKFLOW, ref: PUBLISH_WORKFLOW_REF }
+];
+
+/**
+ * One generated Dependabot file: where it lives and what it should contain. Unlike a
+ * {@link WorkflowTemplate} it calls no central workflow, so there is no ref to match.
+ *
+ * @example
+ * const [config] = dependabotTemplates;
+ * await files.write(config.path, config.content);
+ */
+export type DependabotTemplate = {
+  /** Repo-relative path the file is written to. */
+  readonly path: string;
+  /** The rendered YAML body. */
+  readonly content: string;
+};
+
+/** The Dependabot config and its automerge workflow, in the order `setup` writes them. */
+export const dependabotTemplates: readonly DependabotTemplate[] = [
+  { path: DEPENDABOT_CONFIG_PATH, content: DEPENDABOT_CONFIG },
+  { path: DEPENDABOT_AUTOMERGE_PATH, content: DEPENDABOT_AUTOMERGE }
 ];
 
 /**
