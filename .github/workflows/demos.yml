@@ -114,10 +114,15 @@ jobs:
           echo "demos=$demos" >> "$GITHUB_OUTPUT"
       - name: Refuse hardcoded local paths
         # Engine and editor paths are always parameters (--engine, --editor), never written down.
+        # Only the demos that run are checked. "/home/" counts only at a path root, so a feature
+        # folder named home (features/home/...) is not a hit.
+        env:
+          DEMOS: ${{ steps.find.outputs.demos }}
         run: |
           set -euo pipefail
-          if git ls-files -z | grep -zv -E '(^|/)bun\.lockb?$' \
-            | xargs -0 grep -nE '/Users/|/home/[a-z]|\?\? "\.\./' --; then
+          mapfile -t dirs < <(jq -r '.[]' <<< "$DEMOS")
+          if git ls-files -z -- "${dirs[@]}" | grep -zv -E '(^|/)bun\.lockb?$' \
+            | xargs -0 grep -nE '/Users/|(^|[^A-Za-z0-9_.~-])/home/[a-z]|\?\? "\.\./' --; then
             echo "A tracked file holds a hardcoded local path. Pass it as --engine or --editor." >&2
             exit 1
           fi
