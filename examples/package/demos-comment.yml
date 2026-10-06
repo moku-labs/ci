@@ -1,0 +1,41 @@
+name: Demos on comment
+
+# A PR comment `/demos full` runs the full demos tier against the PR's preview, without a label.
+# Only members and collaborators can trigger it.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  head:
+    if: >-
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/demos full') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      sha: ${{ steps.pr.outputs.sha }}
+      ref: ${{ steps.pr.outputs.ref }}
+    steps:
+      - id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/pulls/$PR" --jq '"sha=\(.head.sha)\nref=\(.head.ref)"' >> "$GITHUB_OUTPUT"
+
+  demos:
+    needs: head
+    uses: moku-labs/ci/.github/workflows/demos.yml@v1
+    with:
+      game: https://pkg.pr.new/@moku-labs/game@${{ needs.head.outputs.sha }}
+      # issue_comment has no head_ref: name the branch to pair with explicitly.
+      paired_ref: ${{ needs.head.outputs.ref }}
+      tier: full

@@ -1,0 +1,28 @@
+name: CI
+
+# ci.yml of a package whose PRs must run the moku demos (the engine, the editor).
+# Same thin caller as ci.yml, plus a `demos` job after the preview is published.
+# Required checks: "ci / lint", "ci / types", "ci / test", "ci / build" and "demos / fast".
+# The label `demos:full` on the PR adds pixels (macOS) and editor scenarios: "demos / full".
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: moku-labs/ci/.github/workflows/package-ci.yml@v1
+
+  demos:
+    needs: ci
+    if: github.event_name == 'pull_request'
+    uses: moku-labs/ci/.github/workflows/demos.yml@v1
+    with:
+      # The preview job of `ci` published this commit; a full sha resolves on pkg.pr.new.
+      # In the editor's repo, pass `editor:` instead of `game:`.
+      game: https://pkg.pr.new/@moku-labs/game@${{ github.event.pull_request.head.sha }}
+      tier: ${{ contains(github.event.pull_request.labels.*.name, 'demos:full') && 'full' || 'fast' }}
