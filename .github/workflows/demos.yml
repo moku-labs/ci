@@ -101,7 +101,7 @@ jobs:
           set -euo pipefail
           demos="$(for f in */package.json; do
             d="${f%/package.json}"
-            jq -e '.moku.demo == true' "$f" >/dev/null 2>&1 && echo "$d"
+            if jq -e '.moku.demo == true' "$f" >/dev/null 2>&1; then echo "$d"; fi
           done | jq -R . | jq -cs .)"
           if [ "$ONLY" != "[]" ]; then
             demos="$(jq -cn --argjson all "$demos" --argjson only "$ONLY" '$all - ($all - $only)')"
