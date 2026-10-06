@@ -24,6 +24,7 @@ everything else lives here, once. Not a build tool and not a framework — it ca
 [Workflows](#workflows) ·
 [Project checks](#project-checks) ·
 [PR previews](#pr-previews) ·
+[Demos](#demos) ·
 [CLI](#cli) ·
 [The contract](#the-contract) ·
 [Versioning](#versioning) ·
@@ -156,6 +157,40 @@ bun add https://pkg.pr.new/@moku-labs/core@42   # 42 = PR number, a commit sha w
 | The package repo must be public. The consuming project may be private. | pkg.pr.new |
 | A preview URL never reaches `main`: the `lint` job and `doctor` both refuse it. | `package-ci.yml`, `preview-deps` |
 | `preview` is not a required check. Turn it off with `with: { preview: false }`. | caller `ci.yml` |
+
+## Demos
+
+`demos.yml` runs the moku demos (`moku-labs/demos`) against what a pull request builds, so an
+engine or editor change that breaks a real game fails on its own PR.
+
+```yaml
+demos:
+  needs: ci
+  if: github.event_name == 'pull_request'
+  uses: moku-labs/ci/.github/workflows/demos.yml@v1
+  with:
+    game: https://pkg.pr.new/@moku-labs/game@${{ github.event.pull_request.head.sha }}
+    tier: ${{ contains(github.event.pull_request.labels.*.name, 'demos:full') && 'full' || 'fast' }}
+```
+
+| Input | Default | Meaning |
+|---|---|---|
+| `game`, `editor` | `""` | A version, a pkg.pr.new URL, or empty for each demo's own pin |
+| `tier` | `fast` | `fast`: `bun run test` on ubuntu. `full`: plus `test:visual` on macos-latest and `test:editor` |
+| `demos_ref` | `main` | demos branch when no paired branch exists |
+| `paired_ref` | PR branch | demos branch with this name wins, for an intended break |
+| `only` | `[]` | JSON array of demo folders; empty = all |
+
+| Rule | Where |
+|---|---|
+| A demo is a folder whose `package.json` has `"moku": { "demo": true }`. | demos repo |
+| The workflow only calls the demo's scripts with `--engine` / `--editor`; the demo's runner picks the package, as it does locally. | demo runner |
+| A tracked file with `/Users/`, `/home/…` or `?? "../` fails the run. Paths are parameters. | `discover` |
+| Checks to require: `demos / fast`; `demos / full` reports only on the full tier. | rulesets |
+| Pixels run on macOS: on Linux runners WebGPU loses its device. | `visual-run` |
+
+Examples: `examples/package/ci-with-demos.yml` (label `demos:full`) and
+`examples/package/demos-comment.yml` (PR comment `/demos full`).
 
 ## CLI
 

@@ -1,0 +1,247 @@
+name: Demos
+
+# Runs the moku demos (moku-labs/demos) against the engine and editor a pull request builds, so an
+# engine or editor change that breaks a real game shows on its own PR.
+#
+# The workflow is thin on purpose. Picking an engine or an editor (a version, a pkg.pr.new
+# preview URL, or nothing = the demo's own pin) is the job of each demo's runner, the same
+# `bun run test --engine <...> --editor <...>` a developer runs locally. This file only finds the
+# demos, checks them for hardcoded local paths and calls their scripts.
+#
+# Tiers:
+#   fast — `bun run test` (unit + headless e2e) on ubuntu. Cheap; the one to require.
+#   full — fast, plus `bun run test:visual` on macos-latest (pixel baselines are shot there:
+#          WebGPU on Linux runners loses its device) and `bun run test:editor` on ubuntu.
+#
+# Stable check names for rulesets: "<caller job id> / fast" and "<caller job id> / full". The
+# per-demo matrix jobs report into those two.
+#
+# A demos branch with the same name as the caller's PR branch wins over `demos_ref`: that is how
+# an intended break in the engine lands together with its fix in the demos.
+on:
+  workflow_call:
+    inputs:
+      game:
+        description: >-
+          Engine for the demos: a version ("0.8.0"), a pkg.pr.new URL, or empty for each demo's
+          own pin. A caller PR passes its preview, built from the head sha.
+        type: string
+        required: false
+        default: ""
+      editor:
+        description: Editor for the demos, same forms as `game`.
+        type: string
+        required: false
+        default: ""
+      tier:
+        description: '"fast" or "full".'
+        type: string
+        required: false
+        default: fast
+      demos_ref:
+        description: Branch or sha of moku-labs/demos when no paired branch exists.
+        type: string
+        required: false
+        default: main
+      paired_ref:
+        description: >-
+          Branch name to look for in moku-labs/demos before `demos_ref`. Empty = the caller's PR
+          branch (`github.head_ref`). Events without a head ref, like issue_comment, pass it.
+        type: string
+        required: false
+        default: ""
+      only:
+        description: >-
+          JSON array of demo folders to run, '["merge-game"]'. Empty = every demo. The demos repo
+          passes its changed demos.
+        type: string
+        required: false
+        default: "[]"
+      bun_version:
+        description: Bun version passed to setup-bun.
+        type: string
+        required: false
+        default: latest
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.ref.outputs.ref }}
+      demos: ${{ steps.find.outputs.demos }}
+    steps:
+      - name: Pick the demos ref (a paired branch wins)
+        id: ref
+        env:
+          HEAD_REF: ${{ inputs.paired_ref || github.head_ref }}
+          DEMOS_REF: ${{ inputs.demos_ref }}
+          CALLER: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          ref="$DEMOS_REF"
+          if [ "$CALLER" != "moku-labs/demos" ] && [ -n "$HEAD_REF" ] \
+            && git ls-remote --exit-code --heads https://github.com/moku-labs/demos.git "$HEAD_REF" >/dev/null; then
+            ref="$HEAD_REF"
+            echo "Paired demos branch: $ref"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          repository: moku-labs/demos
+          ref: ${{ steps.ref.outputs.ref }}
+          persist-credentials: false
+      - name: Find the demos
+        id: find
+        env:
+          ONLY: ${{ inputs.only }}
+        run: |
+          set -euo pipefail
+          demos="$(for f in */package.json; do
+            d="${f%/package.json}"
+            jq -e '.moku.demo == true' "$f" >/dev/null 2>&1 && echo "$d"
+          done | jq -R . | jq -cs .)"
+          if [ "$ONLY" != "[]" ]; then
+            demos="$(jq -cn --argjson all "$demos" --argjson only "$ONLY" '$all - ($all - $only)')"
+          fi
+          if [ "$demos" = "[]" ]; then
+            echo "No demo to run: no package.json with \"moku\": { \"demo\": true } matched." >&2
+            exit 1
+          fi
+          echo "Demos: $demos"
+          echo "demos=$demos" >> "$GITHUB_OUTPUT"
+      - name: Refuse hardcoded local paths
+        # Engine and editor paths are always parameters (--engine, --editor), never written down.
+        run: |
+          set -euo pipefail
+          if git ls-files -z | grep -zv -E '(^|/)bun\.lockb?$' \
+            | xargs -0 grep -nE '/Users/|/home/[a-z]|\?\? "\.\./' --; then
+            echo "A tracked file holds a hardcoded local path. Pass it as --engine or --editor." >&2
+            exit 1
+          fi
+
+  fast-run:
+    needs: discover
+    name: fast (${{ matrix.demo }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        demo: ${{ fromJSON(needs.discover.outputs.demos) }}
+    env:
+      GAME: ${{ inputs.game }}
+      EDITOR_PKG: ${{ inputs.editor }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.demo }}
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          repository: moku-labs/demos
+          ref: ${{ needs.discover.outputs.ref }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ inputs.bun_version }}
+      - run: bun install --frozen-lockfile
+      - name: bun run test
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "$GAME" ]; then args+=(--engine "$GAME"); fi
+          if [ -n "$EDITOR_PKG" ]; then args+=(--editor "$EDITOR_PKG"); fi
+          bun run test ${args[@]+"${args[@]}"}
+
+  visual-run:
+    needs: discover
+    if: inputs.tier == 'full'
+    name: visual (${{ matrix.demo }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        demo: ${{ fromJSON(needs.discover.outputs.demos) }}
+    env:
+      GAME: ${{ inputs.game }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.demo }}
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          repository: moku-labs/demos
+          ref: ${{ needs.discover.outputs.ref }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ inputs.bun_version }}
+      - run: bun install --frozen-lockfile
+      - run: bunx playwright-core install chromium
+      - name: bun run test:visual
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "$GAME" ]; then args+=(--engine "$GAME"); fi
+          bun run test:visual ${args[@]+"${args[@]}"}
+
+  editor-run:
+    needs: discover
+    if: inputs.tier == 'full'
+    name: editor (${{ matrix.demo }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        demo: ${{ fromJSON(needs.discover.outputs.demos) }}
+    env:
+      GAME: ${{ inputs.game }}
+      EDITOR_PKG: ${{ inputs.editor }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.demo }}
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          repository: moku-labs/demos
+          ref: ${{ needs.discover.outputs.ref }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ inputs.bun_version }}
+      - run: bun install --frozen-lockfile
+      - run: bunx playwright-core install --with-deps chromium
+      - name: bun run test:editor
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "$GAME" ]; then args+=(--engine "$GAME"); fi
+          if [ -n "$EDITOR_PKG" ]; then args+=(--editor "$EDITOR_PKG"); fi
+          bun run test:editor ${args[@]+"${args[@]}"}
+
+  # The two stable checks a ruleset can require.
+  fast:
+    needs: [discover, fast-run]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          DISCOVER: ${{ needs.discover.result }}
+          RUN: ${{ needs.fast-run.result }}
+        run: |
+          echo "discover: $DISCOVER, fast: $RUN"
+          [ "$DISCOVER" = success ] && [ "$RUN" = success ]
+
+  full:
+    needs: [fast, visual-run, editor-run]
+    if: always() && inputs.tier == 'full'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          FAST: ${{ needs.fast.result }}
+          VISUAL: ${{ needs.visual-run.result }}
+          EDITOR_RUN: ${{ needs.editor-run.result }}
+        run: |
+          echo "fast: $FAST, visual: $VISUAL, editor: $EDITOR_RUN"
+          [ "$FAST" = success ] && [ "$VISUAL" = success ] && [ "$EDITOR_RUN" = success ]
