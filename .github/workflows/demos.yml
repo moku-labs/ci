@@ -172,7 +172,7 @@ jobs:
             };
             pin("dependencies", "@moku-labs/game", process.env.GAME);
             pin("devDependencies", "@moku-labs/editor", process.env.EDITOR_PKG);
-            fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
           '
           bun install
       - run: bun run test
@@ -216,7 +216,7 @@ jobs:
             };
             pin("dependencies", "@moku-labs/game", process.env.GAME);
             pin("devDependencies", "@moku-labs/editor", process.env.EDITOR_PKG);
-            fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
           '
           bun install
       - run: bun run test:visual
@@ -261,7 +261,7 @@ jobs:
             };
             pin("dependencies", "@moku-labs/game", process.env.GAME);
             pin("devDependencies", "@moku-labs/editor", process.env.EDITOR_PKG);
-            fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
           '
           bun install
       - run: bun run test:editor
