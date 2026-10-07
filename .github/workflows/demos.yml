@@ -3,10 +3,10 @@ name: Demos
 # Runs the moku demos (moku-labs/demos) against the engine and editor a pull request builds, so an
 # engine or editor change that breaks a real game shows on its own PR.
 #
-# The workflow is thin on purpose. Picking an engine or an editor (a version, a pkg.pr.new
-# preview URL, or nothing = the demo's own pin) is the job of each demo's runner, the same
-# `bun run test --engine <...> --editor <...>` a developer runs locally. This file only finds the
-# demos, checks them for hardcoded local paths and calls their scripts.
+# The workflow is thin on purpose. An engine or an editor to test (a version, a pkg.pr.new
+# preview URL, or nothing = the demo's own pin) is written over the demo's pin in package.json and
+# installed, as a developer does locally; then the demo's plain scripts run. This file finds the
+# demos, checks them for hardcoded local paths, swaps the pins and calls the scripts.
 #
 # Tiers:
 #   fast — `bun run test` (unit + headless e2e) on ubuntu. Cheap; the one to require.
@@ -120,7 +120,7 @@ jobs:
           echo "Demos: $demos"
           echo "demos=$demos" >> "$GITHUB_OUTPUT"
       - name: Refuse hardcoded local paths
-        # Engine and editor paths are always parameters (--engine, --editor), never written down.
+        # Engine and editor paths are never written down: a local engine is a packed .tgz, not a path.
         # Only the demos that run are checked. "/home/" counts only at a path root, so a feature
         # folder named home (features/home/...) is not a hit.
         env:
@@ -130,7 +130,7 @@ jobs:
           mapfile -t dirs < <(jq -r '.[]' <<< "$DEMOS")
           if git ls-files -z -- "${dirs[@]}" | grep -zv -E '(^|/)bun\.lockb?$' \
             | xargs -0 grep -nE '/Users/|(^|[^A-Za-z0-9_.~-])/home/[a-z]|\?\? "\.\./' --; then
-            echo "A tracked file holds a hardcoded local path. Pass it as --engine or --editor." >&2
+            echo "A tracked file holds a hardcoded local path. Pin a version, a preview URL or a packed .tgz instead." >&2
             exit 1
           fi
 
@@ -158,13 +158,24 @@ jobs:
         with:
           bun-version: ${{ inputs.bun_version }}
       - run: bun install --frozen-lockfile
-      - name: bun run test
+      - name: The engine and the editor under test
+        if: env.GAME != '' || env.EDITOR_PKG != ''
+        # The pins of package.json take the given versions or preview URLs; `bun add <url>` over an
+        # installed version fails with a DependencyLoop, so the pin is written and installed.
         run: |
           set -euo pipefail
-          args=()
-          if [ -n "$GAME" ]; then args+=(--engine "$GAME"); fi
-          if [ -n "$EDITOR_PKG" ]; then args+=(--editor "$EDITOR_PKG"); fi
-          bun run test ${args[@]+"${args[@]}"}
+          node -e '
+            const fs = require("node:fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            const pin = (section, name, spec) => {
+              if (spec && pkg[section]?.[name] !== undefined) pkg[section][name] = spec;
+            };
+            pin("dependencies", "@moku-labs/game", process.env.GAME);
+            pin("devDependencies", "@moku-labs/editor", process.env.EDITOR_PKG);
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          '
+          bun install
+      - run: bun run test
 
   visual-run:
     needs: discover
@@ -191,12 +202,24 @@ jobs:
           bun-version: ${{ inputs.bun_version }}
       - run: bun install --frozen-lockfile
       - run: bunx playwright-core install chromium
-      - name: bun run test:visual
+      - name: The engine and the editor under test
+        if: env.GAME != '' || env.EDITOR_PKG != ''
+        # The pins of package.json take the given versions or preview URLs; `bun add <url>` over an
+        # installed version fails with a DependencyLoop, so the pin is written and installed.
         run: |
           set -euo pipefail
-          args=()
-          if [ -n "$GAME" ]; then args+=(--engine "$GAME"); fi
-          bun run test:visual ${args[@]+"${args[@]}"}
+          node -e '
+            const fs = require("node:fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            const pin = (section, name, spec) => {
+              if (spec && pkg[section]?.[name] !== undefined) pkg[section][name] = spec;
+            };
+            pin("dependencies", "@moku-labs/game", process.env.GAME);
+            pin("devDependencies", "@moku-labs/editor", process.env.EDITOR_PKG);
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          '
+          bun install
+      - run: bun run test:visual
 
   editor-run:
     needs: discover
@@ -224,13 +247,24 @@ jobs:
           bun-version: ${{ inputs.bun_version }}
       - run: bun install --frozen-lockfile
       - run: bunx playwright-core install --with-deps chromium
-      - name: bun run test:editor
+      - name: The engine and the editor under test
+        if: env.GAME != '' || env.EDITOR_PKG != ''
+        # The pins of package.json take the given versions or preview URLs; `bun add <url>` over an
+        # installed version fails with a DependencyLoop, so the pin is written and installed.
         run: |
           set -euo pipefail
-          args=()
-          if [ -n "$GAME" ]; then args+=(--engine "$GAME"); fi
-          if [ -n "$EDITOR_PKG" ]; then args+=(--editor "$EDITOR_PKG"); fi
-          bun run test:editor ${args[@]+"${args[@]}"}
+          node -e '
+            const fs = require("node:fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            const pin = (section, name, spec) => {
+              if (spec && pkg[section]?.[name] !== undefined) pkg[section][name] = spec;
+            };
+            pin("dependencies", "@moku-labs/game", process.env.GAME);
+            pin("devDependencies", "@moku-labs/editor", process.env.EDITOR_PKG);
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          '
+          bun install
+      - run: bun run test:editor
 
   # The two stable checks a ruleset can require.
   fast:
