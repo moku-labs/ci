@@ -74,6 +74,13 @@ permissions:
   # A called workflow can never elevate beyond what the caller granted: the caller's job must
   # carry `permissions: { contents: write, id-token: write }` or release/publish fail.
 
+# actions/checkout runs `git init`, and git prints a 10-line hint about the default branch name
+# when none is set. One config for every git call of the jobs keeps the logs clean.
+env:
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: init.defaultBranch
+  GIT_CONFIG_VALUE_0: main
+
 jobs:
   # 1. Reuse the IDENTICAL checks from package-ci.yml. The relative "./" form resolves
   #    against THIS repo at THIS ref, so a caller pinned to @v1 gets v1's checks.
