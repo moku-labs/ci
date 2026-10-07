@@ -53,6 +53,13 @@ concurrency:
 permissions:
   contents: read # workflow-level least privilege; no job here needs more
 
+# actions/checkout runs `git init`, and git prints a 10-line hint about the default branch name
+# when none is set. One config for every git call of the jobs keeps the logs clean.
+env:
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: init.defaultBranch
+  GIT_CONFIG_VALUE_0: main
+
 jobs:
   lint:
     runs-on: ${{ inputs.runs_on }}
