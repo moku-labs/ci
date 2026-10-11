@@ -16,6 +16,16 @@ const RELEASE_PREFIX = "release / ";
 /** How many commits of the default branch the query reads to measure the distance to the tag. */
 export const HISTORY_DEPTH = 30;
 
+/**
+ * How many commits back CI is looked for. A commit merged by GITHUB_TOKEN (a Dependabot
+ * auto-merge) starts no workflow and has no check at all, so the newest commit that has
+ * checks answers for it.
+ */
+export const RECENT_DEPTH = 6;
+
+/** The author name GitHub gives every Dependabot commit. */
+const DEPENDABOT = "dependabot[bot]";
+
 /** The scope every family package is published under. */
 const FAMILY_SCOPE = "@moku-labs/";
 
@@ -42,8 +52,11 @@ export const FLEET_QUERY = `query($org: String!) {
           target {
             ... on Commit {
               oid
-              history(first: ${HISTORY_DEPTH}) { nodes { oid } }
+              history(first: ${HISTORY_DEPTH}) { nodes { oid author { name } } }
               statusCheckRollup { contexts(first: 100) { nodes { ... on CheckRun { name status conclusion } } } }
+              recent: history(first: ${RECENT_DEPTH}) {
+                nodes { statusCheckRollup { contexts(first: 100) { nodes { ... on CheckRun { name status conclusion } } } } }
+              }
             }
           }
         }
@@ -159,6 +172,12 @@ export type FleetRepo = {
 /** One check of a commit, as the query returns it. A status context has no name. */
 type RawCheck = { name?: string; status?: string; conclusion?: string | null } | null;
 
+/** The checks of a commit, as the query returns them. Absent for a commit without checks. */
+type RawRollup = { contexts?: { nodes?: RawCheck[] } } | null;
+
+/** One commit of the default branch, as the query returns it. */
+type RawCommit = { oid?: string; author?: { name?: string } | null };
+
 /** The parents of a commit, as the query returns them. */
 type RawParents = { parents?: { nodes?: { oid?: string }[] } };
 
@@ -172,8 +191,9 @@ type RawRepo = {
   defaultBranchRef?: {
     target?: {
       oid?: string;
-      history?: { nodes?: { oid?: string }[] };
-      statusCheckRollup?: { contexts?: { nodes?: RawCheck[] } } | null;
+      history?: { nodes?: RawCommit[] };
+      statusCheckRollup?: RawRollup;
+      recent?: { nodes?: { statusCheckRollup?: RawRollup }[] };
     };
   } | null;
   refs?: { nodes?: { name?: string; target?: RawParents & { target?: RawParents } }[] };
@@ -295,6 +315,76 @@ function isRelease(check: NonNullable<RawCheck>): boolean {
 }
 
 /**
+ * How many commits of the default branch wait for a release: the ones after the released
+ * commit that a person wrote. A Dependabot commit is not counted. When its bump changes the
+ * published package the Dependabot job releases it, and then it is the released commit;
+ * left unreleased, it moved `devDependencies` only and there is nothing to release.
+ *
+ * @param history - The newest commits of the default branch, newest first.
+ * @param released - The commit the newest release tag was cut from.
+ * @returns The count, or `HISTORY_DEPTH` when the released commit is older than the history read.
+ * @example
+ * unreleasedCommits([{ oid: "c2" }, { oid: "c1" }], "c1"); // 1
+ */
+export function unreleasedCommits(
+  history: readonly RawCommit[],
+  released: string | undefined
+): number {
+  const index = history.findIndex(commit => commit.oid === released);
+  if (index === -1) return HISTORY_DEPTH;
+
+  return history.slice(0, index).filter(commit => commit.author?.name !== DEPENDABOT).length;
+}
+
+/**
+ * The checks of a commit that carry a name. A status context has none and is left out.
+ *
+ * @param rollup - The checks of a commit, as the query returns them.
+ * @returns The named checks, or an empty list for a commit without checks.
+ * @example
+ * namedChecks(head.statusCheckRollup);
+ */
+function namedChecks(rollup: RawRollup | undefined): NonNullable<RawCheck>[] {
+  return (rollup?.contexts?.nodes ?? []).filter(
+    (check): check is NonNullable<RawCheck> => check?.name !== undefined
+  );
+}
+
+/**
+ * The state of CI on the default branch: the CI checks of the newest commit that has any.
+ *
+ * @param commits - The checks of the newest commits, newest first.
+ * @returns The state, or `none` when no recent commit ran CI.
+ * @example
+ * ciState([[], [{ name: "ci / lint", status: "COMPLETED", conclusion: "SUCCESS" }]]); // "green"
+ */
+export function ciState(commits: readonly (readonly NonNullable<RawCheck>[])[]): PipelineState {
+  const ran = commits.map(checks => checks.filter(check => !isRelease(check)));
+
+  return pipelineState(ran.find(checks => checks.length > 0) ?? []);
+}
+
+/**
+ * The state of the release of the default branch. The release checks of the newest commit
+ * decide when it has them. A release dispatched by hand or by the Dependabot job leaves no
+ * check on the commit, so there the tag decides: a tag on the newest commit is a release.
+ *
+ * @param checks - The checks of the newest commit.
+ * @param released - Whether the newest release tag sits on the newest commit.
+ * @returns The state, or `none` when the commit has neither a release check nor a tag.
+ * @example
+ * releaseState([], true); // "green"
+ */
+export function releaseState(
+  checks: readonly NonNullable<RawCheck>[],
+  released: boolean
+): PipelineState {
+  const state = pipelineState(checks.filter(check => isRelease(check)));
+
+  return state === "none" && released ? "green" : state;
+}
+
+/**
  * The GitHub URL of a repository, or of a page inside it.
  *
  * @param org - The organization login.
@@ -335,23 +425,20 @@ function toRepo(raw: RawRepo): FleetRepo {
   const manifest = parseManifest(raw.manifest?.text ?? undefined);
   const head = raw.defaultBranchRef?.target;
   const bun = raw.bun?.text?.trim();
-  const checks = (head?.statusCheckRollup?.contexts?.nodes ?? []).filter(
-    (check): check is NonNullable<RawCheck> => check?.name !== undefined
-  );
+  const checks = namedChecks(head?.statusCheckRollup);
+  const recent = (head?.recent?.nodes ?? []).map(node => namedChecks(node.statusCheckRollup));
   const publishes =
     raw.publish?.byteSize !== undefined && manifest.private !== true && manifest.name !== undefined;
   const newest = publishes ? newestRelease(raw) : undefined;
-  const distance = (head?.history?.nodes ?? []).findIndex(node => node.oid === newest?.released);
+  const distance = unreleasedCommits(head?.history?.nodes ?? [], newest?.released);
 
   return {
     name: raw.name ?? "",
     isPrivate: raw.isPrivate === true,
     ...(publishes && manifest.name !== undefined ? { packageName: manifest.name } : {}),
-    ci: pipelineState(checks.filter(check => !isRelease(check))),
-    release: pipelineState(checks.filter(check => isRelease(check))),
-    ...(newest === undefined
-      ? {}
-      : { tag: newest.tag, unreleased: distance === -1 ? HISTORY_DEPTH : distance }),
+    ci: ciState([checks, ...recent]),
+    release: releaseState(checks, newest !== undefined && distance === 0),
+    ...(newest === undefined ? {} : { tag: newest.tag, unreleased: distance }),
     pullRequests: (raw.pullRequests?.nodes ?? []).map(pr => ({
       number: pr.number ?? 0,
       bot: (pr.author?.login ?? "").endsWith("[bot]") || pr.author?.login === "dependabot",
