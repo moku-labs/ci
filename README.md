@@ -119,7 +119,7 @@ flowchart LR
 | [`examples/package/publish.local-publish.yml`](examples/package/publish.local-publish.yml) | Fallback: publish from the project's own job. Use it only if the central publish fails npm auth. |
 | [`rulesets/main.json`](rulesets/main.json) | Branch ruleset for `main`: PR only, no force-push, the four `ci / …` checks required. |
 | [`examples/dependabot.yml`](examples/dependabot.yml) | Dependabot config: one grouped PR a day for `@moku-labs/*` only. `setup` writes it to `.github/dependabot.yml`. |
-| [`examples/org/fleet.yml`](examples/org/fleet.yml) | For the organization's `.github` repository. Every 15 minutes it runs `moku-release fleet --markdown` and puts the table between `<!-- fleet:start -->` and `<!-- fleet:end -->` of `profile/README.md`. |
+| [`examples/org/fleet.yml`](examples/org/fleet.yml) | For the organization's `.github` repository. Every 15 minutes it runs `moku-release fleet --markdown --deps` and puts the table between `<!-- fleet:start -->` and `<!-- fleet:end -->` of `profile/README.md`. |
 | [`examples/package/dependabot-automerge.yml`](examples/package/dependabot-automerge.yml) | Turns on auto-merge for a Dependabot PR; the ruleset checks stay the gate. After the merge it dispatches `publish.yml` with `patch`, because a merge made by `GITHUB_TOKEN` starts no push run. `setup` writes it and allows auto-merge on the repo. |
 
 > [!TIP]
@@ -209,7 +209,7 @@ Examples: `examples/package/ci-with-demos.yml` (label `demos:full`) and
 | `bun run release:setup` | once per project | Idempotent wizard: workflows, Dependabot, script contract, first publish, first tag, trusted publisher, branch ruleset, auto-merge, then `doctor`. `--dry-run` prints every action, changes nothing and asks nothing. `--yes` answers every confirmation for an agent or CI; a step that needs your npm OTP is then printed, not run. |
 | `bun run release:doctor` | any time | Changes nothing in the project; it only runs `git fetch --tags` first. Twelve checks, one line each, and the exact `fix:` command for every red line. `--json` for machines. |
 | `bun run release wait` | after each merge to `main` | Refuses unless `origin/main` holds `HEAD`. Waits for the first release tag that holds the commit, then for npm to serve that version. Stops on a failed run and prints the log command. |
-| `bun run release fleet` | any time | Read-only. One table for every repository of the organization: CI on `main`, the release of `main`, tag against npm, commits nobody released, open PRs, old `@moku-labs/*` pins. Then the list of what waits for a person. `--markdown` prints the public rows for the organization page, `--json` every row. |
+| `bun run release fleet` | any time | Read-only. One table for every repository of the organization: CI on `main`, the release of `main`, tag against npm, commits nobody released, open PRs, old `@moku-labs/*` pins. Then the list of what waits for a person. `--markdown` prints the public rows for the organization page, `--json` every row. `--deps` adds two tables: the shared toolchain with the version most repositories are on, and the runtime dependencies that are behind npm. Only the dependencies a manifest names are read. |
 | `bun run release <patch\|minor\|major\|prerelease>` | a release a person asks for | Refuses unless the tree is clean and `HEAD == origin/main`. Dispatches `publish.yml`, watches the run, verifies the version and dist-tag on npm. |
 
 The scripts are plain aliases of the `moku-release` bin. Internals and the list of checks:
