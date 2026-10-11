@@ -9,6 +9,7 @@
  */
 import { type BrandPrompts, createBrandConsole, createBrandPrompts } from "@moku-labs/common/cli";
 import { runDoctor } from "./commands/doctor";
+import { runFleet } from "./commands/fleet";
 import { runRelease } from "./commands/release";
 import { runSetup } from "./commands/setup";
 import { runWait } from "./commands/wait";
@@ -22,6 +23,8 @@ const USAGE = [
   "  moku-release setup              one-time wizard: workflows, contract, first publish",
   "  moku-release doctor [--json]    read-only diagnosis of the release setup",
   "  moku-release wait               wait for the auto-release of HEAD, verify it on npm",
+  "  moku-release fleet [--json|--markdown]",
+  "                                  every repository of the organization in one table",
   `  moku-release <${RELEASE_TYPES.join("|")}>`,
   "",
   "  A merge to main releases a patch by itself. A person releases minor,",
@@ -84,6 +87,10 @@ async function dispatch(
   }
 
   if (parsed.command === "wait") return runWait({ ctx, ui });
+
+  if (parsed.command === "fleet") {
+    return runFleet({ ctx, ui, json: parsed.json, markdown: parsed.markdown === true });
+  }
 
   if (parsed.command === "release" && parsed.releaseType !== undefined) {
     return runRelease({ ctx, ui, releaseType: parsed.releaseType, dryRun: parsed.dryRun });

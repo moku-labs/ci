@@ -3,7 +3,7 @@
  * dispatcher.
  *
  * The grammar is deliberately tiny: one positional (a command name, or a semver bump that
- * implies the `release` command) plus four flags. Anything unrecognized resolves to
+ * implies the `release` command) plus five flags. Anything unrecognized resolves to
  * `help` with an `error` set — the CLI never guesses what an operator meant.
  */
 
@@ -11,7 +11,13 @@
 export const RELEASE_TYPES = ["patch", "minor", "major", "prerelease"] as const;
 
 /** Every flag the CLI accepts, besides `--help`. */
-const KNOWN_FLAGS: ReadonlySet<string> = new Set(["--json", "--dry-run", "--yes", "-y"]);
+const KNOWN_FLAGS: ReadonlySet<string> = new Set([
+  "--json",
+  "--markdown",
+  "--dry-run",
+  "--yes",
+  "-y"
+]);
 
 /**
  * A semver bump the release workflow understands.
@@ -27,7 +33,7 @@ export type ReleaseType = (typeof RELEASE_TYPES)[number];
  * @example
  * const command: CommandName = "doctor";
  */
-export type CommandName = "doctor" | "setup" | "wait" | "release" | "help";
+export type CommandName = "doctor" | "setup" | "wait" | "fleet" | "release" | "help";
 
 /**
  * The parsed invocation. `error` is set only when `command` is `help`, and then the entry
@@ -43,6 +49,8 @@ export type ParsedArgv = {
   releaseType?: ReleaseType;
   /** Whether `--json` machine output was requested. */
   json: boolean;
+  /** Whether `--markdown` output was requested (`fleet` only). */
+  markdown?: boolean;
   /** Whether `--dry-run` was requested (no mutation is performed). */
   dryRun: boolean;
   /** Whether `--yes` was requested: every confirmation is answered yes, for agents and CI. */
@@ -108,6 +116,8 @@ export function parseArgv(argv: readonly string[]): ParsedArgv {
 
   if (first === "doctor" || first === "setup" || first === "wait")
     return { command: first, json, dryRun, yes };
+  if (first === "fleet")
+    return { command: first, json, dryRun, yes, markdown: flags.includes("--markdown") };
   if (first === "help") return { command: "help", json, dryRun, yes };
   if (isReleaseType(first)) return { command: "release", releaseType: first, json, dryRun, yes };
 

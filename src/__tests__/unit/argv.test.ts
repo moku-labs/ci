@@ -13,6 +13,11 @@ describe("parseArgv", () => {
     expect(parseArgv(["help"]).command).toBe("help");
   });
 
+  it("parses fleet with its --markdown flag", () => {
+    expect(parseArgv(["fleet"])).toMatchObject({ command: "fleet", markdown: false });
+    expect(parseArgv(["fleet", "--markdown"])).toMatchObject({ command: "fleet", markdown: true });
+  });
+
   it.each(RELEASE_TYPES)("parses `%s` as the release command", type => {
     expect(parseArgv([type])).toEqual({
       command: "release",
