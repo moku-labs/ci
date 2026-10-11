@@ -8,6 +8,11 @@ name: Release
 # `npm publish` runs HERE, in this repo's own publish.yml, so the OIDC claim's
 # job_workflow_ref points at <owner>/<repo>/.github/workflows/publish.yml.
 on:
+  # Auto-release: every merge to main ships a PATCH. A person dispatches minor, or major for
+  # a milestone. A PR merged by GITHUB_TOKEN starts no push run: dependabot-automerge.yml
+  # dispatches the patch for its own merges.
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       release_type:
@@ -39,7 +44,7 @@ jobs:
     if: |
       always() && needs.release.outputs.artifact_name != '' &&
       (
-        (github.event_name == 'workflow_dispatch' && needs.release.outputs.tag != '') ||
+        (github.event_name != 'release' && needs.release.outputs.tag != '') ||
         github.event_name == 'release'
       )
     runs-on: ubuntu-latest
@@ -49,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && needs.release.outputs.tag || github.ref }}
+          ref: ${{ github.event_name != 'release' && needs.release.outputs.tag || github.ref }}
           persist-credentials: false
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
@@ -75,7 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           pkg="$(node -p "require('./package.json').version")"
-          if [ "$EVENT" = "workflow_dispatch" ]; then want="$DISPATCH_VERSION"; else want="${REF_NAME#v}"; fi
+          if [ "$EVENT" = "release" ]; then want="${REF_NAME#v}"; else want="$DISPATCH_VERSION"; fi
           [ -n "$want" ] || { echo "empty version/ref — refusing to publish"; exit 1; }
           [ "$pkg" = "$want" ] || { echo "package.json $pkg != ref $want"; exit 1; }
           # Prereleases go to dist-tag 'next' so they never clobber 'latest'.

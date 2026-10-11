@@ -27,7 +27,7 @@ export type ReleaseType = (typeof RELEASE_TYPES)[number];
  * @example
  * const command: CommandName = "doctor";
  */
-export type CommandName = "doctor" | "setup" | "release" | "help";
+export type CommandName = "doctor" | "setup" | "wait" | "release" | "help";
 
 /**
  * The parsed invocation. `error` is set only when `command` is `help`, and then the entry
@@ -106,7 +106,8 @@ export function parseArgv(argv: readonly string[]): ParsedArgv {
   const [first] = positionals;
   if (first === undefined) return { command: "help", json, dryRun, yes };
 
-  if (first === "doctor" || first === "setup") return { command: first, json, dryRun, yes };
+  if (first === "doctor" || first === "setup" || first === "wait")
+    return { command: first, json, dryRun, yes };
   if (first === "help") return { command: "help", json, dryRun, yes };
   if (isReleaseType(first)) return { command: "release", releaseType: first, json, dryRun, yes };
 

@@ -11,6 +11,7 @@ import { type BrandPrompts, createBrandConsole, createBrandPrompts } from "@moku
 import { runDoctor } from "./commands/doctor";
 import { runRelease } from "./commands/release";
 import { runSetup } from "./commands/setup";
+import { runWait } from "./commands/wait";
 import { type ParsedArgv, parseArgv, RELEASE_TYPES } from "./lib/argv";
 import { createExecutor } from "./lib/exec";
 import { createFileStore } from "./lib/files";
@@ -20,7 +21,11 @@ import type { CheckContext } from "./types";
 const USAGE = [
   "  moku-release setup              one-time wizard: workflows, contract, first publish",
   "  moku-release doctor [--json]    read-only diagnosis of the release setup",
+  "  moku-release wait               wait for the auto-release of HEAD, verify it on npm",
   `  moku-release <${RELEASE_TYPES.join("|")}>`,
+  "",
+  "  A merge to main releases a patch by itself. A person releases minor,",
+  "  or major for a milestone.",
   "",
   "  --dry-run                       print every action, mutate nothing, ask nothing",
   "  --yes, -y                       answer every setup confirmation with yes",
@@ -77,6 +82,8 @@ async function dispatch(
     const prompts = parsed.yes || parsed.dryRun ? ASSENTING_PROMPTS : createBrandPrompts();
     return runSetup({ ctx, ui, prompts, dryRun: parsed.dryRun, unattended: parsed.yes });
   }
+
+  if (parsed.command === "wait") return runWait({ ctx, ui });
 
   if (parsed.command === "release" && parsed.releaseType !== undefined) {
     return runRelease({ ctx, ui, releaseType: parsed.releaseType, dryRun: parsed.dryRun });

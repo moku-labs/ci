@@ -26,6 +26,11 @@ describe("workflow templates", () => {
     );
   });
 
+  it("releases on a merge to main, and still by hand", () => {
+    expect(PUBLISH_WORKFLOW).toMatch(/^ {2}push:\n {4}branches: \[main\]$/m);
+    expect(PUBLISH_WORKFLOW).toContain("workflow_dispatch:");
+  });
+
   it("never mentions a publish token — id-token is the whole credential", () => {
     for (const template of workflowTemplates) {
       expect(template.content).not.toContain("NPM_TOKEN");
@@ -79,6 +84,13 @@ describe("dependabot templates", () => {
       "github.event.pull_request.user.login == 'dependabot[bot]'"
     );
     expect(automerge?.content).toContain('gh pr merge --auto --squash "$PR_URL"');
+  });
+
+  it("dispatches the patch release itself, because its merge starts no push run", () => {
+    expect(automerge?.content).toContain("actions: write");
+    expect(automerge?.content).toContain(
+      'gh workflow run publish.yml --repo "$REPO" --ref main -f release_type=patch'
+    );
   });
 });
 
