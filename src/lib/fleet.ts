@@ -36,6 +36,7 @@ export const FLEET_QUERY = `query($org: String!) {
         name
         isPrivate
         manifest: object(expression: "HEAD:package.json") { ... on Blob { text } }
+        bun: object(expression: "HEAD:.bun-version") { ... on Blob { text } }
         publish: object(expression: "HEAD:.github/workflows/publish.yml") { ... on Blob { byteSize } }
         defaultBranchRef {
           target {
@@ -109,6 +110,20 @@ export type FleetPin = {
 };
 
 /**
+ * The direct dependencies of one repository that are not family packages. Dependencies of
+ * dependencies are never read: only what the manifest itself names.
+ *
+ * @example
+ * const external: FleetExternal = { runtime: { preact: "10.27.0" }, dev: { typescript: "6.0.3" } };
+ */
+export type FleetExternal = {
+  /** `dependencies`: what a consumer installs with the package. */
+  runtime: Record<string, string>;
+  /** `devDependencies`, plus `bun` from `.bun-version`: the tools the repository is built with. */
+  dev: Record<string, string>;
+};
+
+/**
  * One row of the table: everything known about one repository.
  *
  * @example
@@ -137,6 +152,8 @@ export type FleetRepo = {
   pins: FleetPin[];
   /** The exact family pins of the manifest, kept until every newest version is known. */
   pinned?: Record<string, string>;
+  /** The direct dependencies from outside the family, as the manifest writes them. */
+  external: FleetExternal;
 };
 
 /** One check of a commit, as the query returns it. A status context has no name. */
@@ -150,6 +167,7 @@ type RawRepo = {
   name?: string;
   isPrivate?: boolean;
   manifest?: { text?: string } | null;
+  bun?: { text?: string } | null;
   publish?: { byteSize?: number } | null;
   defaultBranchRef?: {
     target?: {
@@ -291,6 +309,20 @@ function repoUrl(org: string, repo: FleetRepo, path = ""): string {
 }
 
 /**
+ * The entries of a dependency map that are not family packages.
+ *
+ * @param dependencies - A dependency map of a manifest, when it has one.
+ * @returns The same map without `@moku-labs/*`.
+ * @example
+ * outsideFamily({ "@moku-labs/core": "1.7.2", preact: "10.27.0" }); // { preact: "10.27.0" }
+ */
+function outsideFamily(dependencies: Record<string, string> | undefined): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(dependencies ?? {}).filter(([name]) => !name.startsWith(FAMILY_SCOPE))
+  );
+}
+
+/**
  * Turn one repository of the answer into a row. The pins are judged later, once the
  * newest version of every package is known.
  *
@@ -302,6 +334,7 @@ function repoUrl(org: string, repo: FleetRepo, path = ""): string {
 function toRepo(raw: RawRepo): FleetRepo {
   const manifest = parseManifest(raw.manifest?.text ?? undefined);
   const head = raw.defaultBranchRef?.target;
+  const bun = raw.bun?.text?.trim();
   const checks = (head?.statusCheckRollup?.contexts?.nodes ?? []).filter(
     (check): check is NonNullable<RawCheck> => check?.name !== undefined
   );
@@ -326,7 +359,14 @@ function toRepo(raw: RawRepo): FleetRepo {
       state: rollupState(pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state)
     })),
     pins: [],
-    pinned: familyPins(manifest)
+    pinned: familyPins(manifest),
+    external: {
+      runtime: outsideFamily(manifest.dependencies),
+      dev: {
+        ...outsideFamily(manifest.devDependencies),
+        ...(bun === undefined || bun === "" ? {} : { bun })
+      }
+    }
   };
 }
 

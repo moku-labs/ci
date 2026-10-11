@@ -23,7 +23,7 @@ const USAGE = [
   "  moku-release setup              one-time wizard: workflows, contract, first publish",
   "  moku-release doctor [--json]    read-only diagnosis of the release setup",
   "  moku-release wait               wait for the auto-release of HEAD, verify it on npm",
-  "  moku-release fleet [--json|--markdown]",
+  "  moku-release fleet [--json|--markdown] [--deps]",
   "                                  every repository of the organization in one table",
   `  moku-release <${RELEASE_TYPES.join("|")}>`,
   "",
@@ -89,7 +89,13 @@ async function dispatch(
   if (parsed.command === "wait") return runWait({ ctx, ui });
 
   if (parsed.command === "fleet") {
-    return runFleet({ ctx, ui, json: parsed.json, markdown: parsed.markdown === true });
+    return runFleet({
+      ctx,
+      ui,
+      json: parsed.json,
+      markdown: parsed.markdown === true,
+      deps: parsed.deps === true
+    });
   }
 
   if (parsed.command === "release" && parsed.releaseType !== undefined) {

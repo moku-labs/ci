@@ -3,7 +3,7 @@
  * dispatcher.
  *
  * The grammar is deliberately tiny: one positional (a command name, or a semver bump that
- * implies the `release` command) plus five flags. Anything unrecognized resolves to
+ * implies the `release` command) plus six flags. Anything unrecognized resolves to
  * `help` with an `error` set — the CLI never guesses what an operator meant.
  */
 
@@ -14,6 +14,7 @@ export const RELEASE_TYPES = ["patch", "minor", "major", "prerelease"] as const;
 const KNOWN_FLAGS: ReadonlySet<string> = new Set([
   "--json",
   "--markdown",
+  "--deps",
   "--dry-run",
   "--yes",
   "-y"
@@ -51,6 +52,8 @@ export type ParsedArgv = {
   json: boolean;
   /** Whether `--markdown` output was requested (`fleet` only). */
   markdown?: boolean;
+  /** Whether `--deps`, the dependency tables, was requested (`fleet` only). */
+  deps?: boolean;
   /** Whether `--dry-run` was requested (no mutation is performed). */
   dryRun: boolean;
   /** Whether `--yes` was requested: every confirmation is answered yes, for agents and CI. */
@@ -117,7 +120,14 @@ export function parseArgv(argv: readonly string[]): ParsedArgv {
   if (first === "doctor" || first === "setup" || first === "wait")
     return { command: first, json, dryRun, yes };
   if (first === "fleet")
-    return { command: first, json, dryRun, yes, markdown: flags.includes("--markdown") };
+    return {
+      command: first,
+      json,
+      dryRun,
+      yes,
+      markdown: flags.includes("--markdown"),
+      deps: flags.includes("--deps")
+    };
   if (first === "help") return { command: "help", json, dryRun, yes };
   if (isReleaseType(first)) return { command: "release", releaseType: first, json, dryRun, yes };
 

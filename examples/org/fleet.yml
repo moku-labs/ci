@@ -28,7 +28,7 @@ jobs:
       - name: Read the fleet
         env:
           GH_TOKEN: ${{ github.token }}
-        run: npx --yes --package @moku-labs/ci@1 moku-release fleet --markdown > fleet.md
+        run: npx --yes --package @moku-labs/ci@1 moku-release fleet --markdown --deps > fleet.md
       - name: Put the table between the markers of profile/README.md
         run: |
           set -euo pipefail
