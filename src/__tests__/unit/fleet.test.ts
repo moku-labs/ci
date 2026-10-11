@@ -114,6 +114,12 @@ describe("parseFleet", () => {
     expect(parseFleet('{"errors":[{"message":"bad credentials"}]}')).toBeUndefined();
   });
 
+  it("leaves the organization's profile repository out", () => {
+    const rows = parseFleet(answer({ ...app, name: ".github" }, app));
+
+    expect(rows?.map(row => row.name)).toEqual(["site"]);
+  });
+
   it("splits the checks of main into CI and release", () => {
     const row = only(
       answer(
