@@ -9,7 +9,8 @@ import {
   pipelineState,
   pullRequestCell,
   renderFleetMarkdown,
-  rollupState
+  rollupState,
+  unreleasedCommits
 } from "../../lib/fleet";
 import type { CheckContext } from "../../types";
 import { captureConsole, memoryFiles, type StubReply, stubExecutor } from "../helpers/ports";
@@ -131,6 +132,26 @@ describe("parseFleet", () => {
     expect(row.release).toBe("green");
   });
 
+  it("reads CI from the newest commit that has checks when the head has none", () => {
+    const merged = packageRepo("core", { checks: [] }) as {
+      defaultBranchRef: { target: Record<string, unknown> };
+    };
+    merged.defaultBranchRef.target.recent = {
+      nodes: [
+        { statusCheckRollup: NOTHING },
+        { statusCheckRollup: { contexts: { nodes: [check("ci / lint", "FAILURE")] } } },
+        { statusCheckRollup: { contexts: { nodes: [check("ci / lint")] } } }
+      ]
+    };
+
+    expect(only(answer(merged)).ci).toBe("red");
+  });
+
+  it("calls a head without release checks released when the newest tag sits on it", () => {
+    expect(only(answer(packageRepo("core", { checks: [] }))).release).toBe("green");
+    expect(only(answer(packageRepo("core", { checks: [], released: "c2" }))).release).toBe("none");
+  });
+
   it("takes the newest semver tag, not the moving major tag or an older prerelease", () => {
     expect(only(answer(packageRepo("core"))).tag).toBe("v1.2.0");
   });
@@ -164,6 +185,29 @@ describe("parseFleet", () => {
       { name: "@moku-labs/core", pinned: "1.7.1", latest: "1.7.2" }
     ]);
     expect(pinsCell(rows?.[1] ?? only(answer(app)))).toBe("core 1.7.1");
+  });
+});
+
+describe("unreleasedCommits", () => {
+  const bot = { name: "dependabot[bot]" };
+  const person = { name: "Alex" };
+
+  it("counts the commits of a person after the released one", () => {
+    const history = [{ oid: "c3", author: person }, { oid: "c2", author: person }, { oid: "c1" }];
+
+    expect(unreleasedCommits(history, "c1")).toBe(2);
+    expect(unreleasedCommits(history, "c3")).toBe(0);
+  });
+
+  it("does not count a Dependabot commit: its bump moved devDependencies only", () => {
+    const history = [{ oid: "c3", author: bot }, { oid: "c2", author: person }, { oid: "c1" }];
+
+    expect(unreleasedCommits(history, "c2")).toBe(0);
+    expect(unreleasedCommits(history, "c1")).toBe(1);
+  });
+
+  it("answers with the depth when the released commit is older than the history", () => {
+    expect(unreleasedCommits([{ oid: "c3" }], "gone")).toBe(HISTORY_DEPTH);
   });
 });
 
