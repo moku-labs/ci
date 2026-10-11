@@ -86,6 +86,11 @@ describe("dependabot templates", () => {
     expect(automerge?.content).toContain('gh pr merge --auto --squash "$PR_URL"');
   });
 
+  it("releases nothing for a bump of devDependencies alone", () => {
+    expect(automerge?.content).toContain("{dependencies, peerDependencies, optionalDependencies}");
+    expect(automerge?.content).toContain("only devDependencies moved");
+  });
+
   it("takes a family release at once, without Dependabot's 3-day cooldown", () => {
     expect(config?.content).toMatch(
       /cooldown:\n\s+default-days: 3\n\s+exclude:\n\s+- "@moku-labs\/\*"/
