@@ -86,6 +86,12 @@ describe("dependabot templates", () => {
     expect(automerge?.content).toContain('gh pr merge --auto --squash "$PR_URL"');
   });
 
+  it("takes a family release at once, without Dependabot's 3-day cooldown", () => {
+    expect(config?.content).toMatch(
+      /cooldown:\n\s+default-days: 3\n\s+exclude:\n\s+- "@moku-labs\/\*"/
+    );
+  });
+
   it("dispatches the patch release itself, because its merge starts no push run", () => {
     expect(automerge?.content).toContain("actions: write");
     expect(automerge?.content).toContain(
