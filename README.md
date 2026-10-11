@@ -120,7 +120,7 @@ flowchart LR
 | [`rulesets/main.json`](rulesets/main.json) | Branch ruleset for `main`: PR only, no force-push, the four `ci / …` checks required. |
 | [`examples/dependabot.yml`](examples/dependabot.yml) | Dependabot config: one grouped PR a day for `@moku-labs/*` only. `setup` writes it to `.github/dependabot.yml`. |
 | [`examples/org/fleet.yml`](examples/org/fleet.yml) | For the organization's `.github` repository. Every 15 minutes it runs `moku-release fleet --markdown --deps` and puts the table between `<!-- fleet:start -->` and `<!-- fleet:end -->` of `profile/README.md`. |
-| [`examples/package/dependabot-automerge.yml`](examples/package/dependabot-automerge.yml) | Turns on auto-merge for a Dependabot PR; the ruleset checks stay the gate. After the merge it dispatches `publish.yml` with `patch`, because a merge made by `GITHUB_TOKEN` starts no push run. `setup` writes it and allows auto-merge on the repo. |
+| [`examples/package/dependabot-automerge.yml`](examples/package/dependabot-automerge.yml) | Turns on auto-merge for a Dependabot PR; the ruleset checks stay the gate. After the merge it dispatches `publish.yml` with `patch`, because a merge made by `GITHUB_TOKEN` starts no push run. A bump of `devDependencies` alone dispatches nothing: the published package is the same, and two packages that pin each other would release each other forever. `setup` writes it and allows auto-merge on the repo. |
 
 > [!TIP]
 > A Layer-3 app copies `examples/app/ci.yml` and `examples/dependabot.yml` by hand and needs
