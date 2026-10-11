@@ -198,6 +198,48 @@ export function latestRunId(stdout: string): string | undefined {
 }
 
 /**
+ * One workflow run, as far as `wait` reads it.
+ *
+ * @example
+ * const run: RunSummary = { databaseId: 42, headSha: "abc123", status: "completed", conclusion: "success" };
+ */
+export type RunSummary = {
+  /** The run id. */
+  databaseId: number;
+  /** The commit the run was started for. */
+  headSha: string;
+  /** `"queued"`, `"in_progress"` or `"completed"`. */
+  status: string;
+  /** `"success"`, `"failure"`, `"cancelled"`, or empty while the run is not completed. */
+  conclusion: string;
+};
+
+/**
+ * The runs from `gh run list --json databaseId,headSha,status,conclusion`, newest first.
+ *
+ * @param stdout - The raw `gh run list` JSON.
+ * @returns The runs that carry an id and a commit; anything else is left out.
+ * @example
+ * parseRuns('[{"databaseId":42,"headSha":"abc123","status":"queued","conclusion":""}]');
+ */
+export function parseRuns(stdout: string): RunSummary[] {
+  const runs = parseJsonArray(stdout) as Partial<RunSummary>[];
+
+  return runs.flatMap(run =>
+    run.databaseId === undefined || run.headSha === undefined
+      ? []
+      : [
+          {
+            databaseId: run.databaseId,
+            headSha: run.headSha,
+            status: run.status ?? "",
+            conclusion: run.conclusion ?? ""
+          }
+        ]
+  );
+}
+
+/**
  * The permalink of a GitHub release, for the final summary.
  *
  * @param ownerRepo - The `owner/repo` slug.

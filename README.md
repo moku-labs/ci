@@ -91,8 +91,17 @@ flowchart LR
 1. `release:setup` writes two thin callers into `.github/workflows/`.
 2. Every PR runs `package-ci.yml`: four jobs, reported as `ci / lint`, `ci / types`,
    `ci / test`, `ci / build`.
-3. `release patch` dispatches `publish.yml`, which calls `package-release.yml`:
-   check → tag → pack → publish. The CLI watches the run and verifies the version on npm.
+3. Every merge to `main` runs `publish.yml`, which calls `package-release.yml`:
+   check → tag → pack → publish. The version is always a patch. `release wait` waits for
+   it and verifies the version on npm.
+4. A person runs `release minor`, or `release major` for a milestone. It dispatches the same
+   `publish.yml`.
+
+| Who releases | Version |
+|---|---|
+| a merge to `main` | patch, always |
+| a person | minor |
+| a person, for a milestone | major |
 
 ## Workflows
 
@@ -110,7 +119,7 @@ flowchart LR
 | [`examples/package/publish.local-publish.yml`](examples/package/publish.local-publish.yml) | Fallback: publish from the project's own job. Use it only if the central publish fails npm auth. |
 | [`rulesets/main.json`](rulesets/main.json) | Branch ruleset for `main`: PR only, no force-push, the four `ci / …` checks required. |
 | [`examples/dependabot.yml`](examples/dependabot.yml) | Dependabot config: one grouped PR a day for `@moku-labs/*` only. `setup` writes it to `.github/dependabot.yml`. |
-| [`examples/package/dependabot-automerge.yml`](examples/package/dependabot-automerge.yml) | Turns on auto-merge for a Dependabot PR; the ruleset checks stay the gate. `setup` writes it and allows auto-merge on the repo. |
+| [`examples/package/dependabot-automerge.yml`](examples/package/dependabot-automerge.yml) | Turns on auto-merge for a Dependabot PR; the ruleset checks stay the gate. After the merge it dispatches `publish.yml` with `patch`, because a merge made by `GITHUB_TOKEN` starts no push run. `setup` writes it and allows auto-merge on the repo. |
 
 > [!TIP]
 > A Layer-3 app copies `examples/app/ci.yml` and `examples/dependabot.yml` by hand and needs
@@ -198,7 +207,8 @@ Examples: `examples/package/ci-with-demos.yml` (label `demos:full`) and
 |---|---|---|
 | `bun run release:setup` | once per project | Idempotent wizard: workflows, Dependabot, script contract, first publish, first tag, trusted publisher, branch ruleset, auto-merge, then `doctor`. `--dry-run` prints every action, changes nothing and asks nothing. `--yes` answers every confirmation for an agent or CI; a step that needs your npm OTP is then printed, not run. |
 | `bun run release:doctor` | any time | Changes nothing in the project; it only runs `git fetch --tags` first. Twelve checks, one line each, and the exact `fix:` command for every red line. `--json` for machines. |
-| `bun run release <patch\|minor\|major\|prerelease>` | each release | Refuses unless the tree is clean and `HEAD == origin/main`. Dispatches `publish.yml`, watches the run, verifies the version and dist-tag on npm. |
+| `bun run release wait` | after each merge to `main` | Refuses unless `origin/main` holds `HEAD`. Waits for the first release tag that holds the commit, then for npm to serve that version. Stops on a failed run and prints the log command. |
+| `bun run release <patch\|minor\|major\|prerelease>` | a release a person asks for | Refuses unless the tree is clean and `HEAD == origin/main`. Dispatches `publish.yml`, watches the run, verifies the version and dist-tag on npm. |
 
 The scripts are plain aliases of the `moku-release` bin. Internals and the list of checks:
 [src/README.md](src/README.md).
