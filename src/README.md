@@ -11,7 +11,8 @@ Two things it will never do: **log you in** and **handle a credential**. `gh aut
 ```sh
 bun run release:setup      # one-time wizard (idempotent — re-runnable any time)
 bun run release:doctor     # read-only diagnosis; exit 1 if anything fails
-bun run release patch      # dispatch publish.yml, watch the run, verify the artifact
+bun run release wait       # wait for the auto-release of HEAD, verify the artifact
+bun run release minor      # dispatch publish.yml, watch the run, verify the artifact
 
 moku-release doctor --json # machine output
 moku-release patch --dry-run
@@ -88,6 +89,7 @@ Both `setup` and the release command accept `--dry-run`, which prints every acti
 | `commands/setup.ts` | The idempotent one-time wizard. |
 | `commands/doctor.ts` | The read-only report (branded or `--json`), reused as the release preflight. |
 | `commands/release.ts` | Preflight → dispatch → watch → registry verification → summary. |
+| `commands/wait.ts` | HEAD on main → tag that holds it → registry verification → summary. Dispatches nothing. |
 | `checks/*.ts` | One diagnostic per file; `checks/index.ts` is the ordered registry. |
 | `lib/exec.ts` · `lib/files.ts` | The two injectable ports (`capture`/`inherit`, `read`/`write`/`backup`). |
 | `lib/npm.ts` · `lib/git.ts` · `lib/github.ts` | Pure parsers: semver + dist-tags, remote URLs + tags, `gh` JSON. |

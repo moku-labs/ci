@@ -6,9 +6,10 @@ describe("parseArgv", () => {
     expect(parseArgv([])).toEqual({ command: "help", json: false, dryRun: false, yes: false });
   });
 
-  it("parses the two named commands", () => {
+  it("parses the named commands", () => {
     expect(parseArgv(["doctor"]).command).toBe("doctor");
     expect(parseArgv(["setup"]).command).toBe("setup");
+    expect(parseArgv(["wait"]).command).toBe("wait");
     expect(parseArgv(["help"]).command).toBe("help");
   });
 

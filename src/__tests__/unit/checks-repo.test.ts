@@ -168,6 +168,19 @@ describe("workflowsCheck", () => {
   });
 });
 
+describe("workflowsCheck — auto-release", () => {
+  it("warns for a thin publish.yml that has no push trigger", async () => {
+    const path = ".github/workflows/publish.yml";
+    const thin = thinWorkflows();
+    const manualOnly = (thin[path] ?? "").replace(/^ {2}push:\n {4}branches: \[main\]\n/m, "");
+    const result = await workflowsCheck.run(contextWith({}, { ...thin, [path]: manualOnly }));
+
+    expect(manualOnly).not.toContain("push:");
+    expect(result.status).toBe("warn");
+    expect(result.fix).toContain("push: branches: [main]");
+  });
+});
+
 describe("tagSyncCheck", () => {
   it("passes when the newest tag and npm latest agree", async () => {
     const result = await tagSyncCheck.run(withTagAndNpm("v1.2.3", "1.2.3"));

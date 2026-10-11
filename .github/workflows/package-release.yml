@@ -3,9 +3,11 @@ name: Package Release
 # Reusable release + publish pipeline for every moku-family npm package:
 #   check (reuses package-ci.yml) -> release (tag-only) -> package (no token) -> publish (OIDC).
 #
-# Two entry points, decided by the CALLER's event (in a reusable workflow `github.event_name`
+# Three entry points, decided by the CALLER's event (in a reusable workflow `github.event_name`
 # and `github.ref` are the caller's):
-#   - workflow_dispatch : cut the tag + GitHub release here, then package + publish inline.
+#   - push to main      : the auto-release. Always a PATCH; then package + publish inline.
+#   - workflow_dispatch : a release a person asked for (minor, or major for a milestone).
+#                         Cut the tag + GitHub release here, then package + publish inline.
 #   - release: published: the `release` job is SKIPPED; publish from the release tag.
 #
 # NO concurrency block here on purpose. The caller (publish.yml) owns it with a DISTINCT
@@ -17,7 +19,7 @@ on:
   workflow_call:
     inputs:
       release_type:
-        description: Semver bump for this release (patch|minor|major|prerelease). Dispatch path only.
+        description: Semver bump for this release (patch|minor|major|prerelease). Dispatch path only; a push to main is always patch.
         type: string
         required: false
       publish:
@@ -92,10 +94,11 @@ jobs:
       validate: ${{ inputs.validate }}
       extra: ${{ inputs.extra }}
 
-  # 2. Cut a tag-only release. Dispatch-on-main path only. NEVER writes refs/heads/main.
+  # 2. Cut a tag-only release. Push-to-main and dispatch-on-main paths. NEVER writes
+  #    refs/heads/main, so the tag push cannot start another run.
   release:
     needs: check
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ${{ inputs.runs_on }}
     permissions:
       contents: write # ONLY this job pushes a tag + creates a release
@@ -104,7 +107,9 @@ jobs:
       version: ${{ steps.bump.outputs.version }}
       prev_tag: ${{ steps.bump.outputs.prev_tag }}
     env:
-      RELEASE_TYPE: ${{ inputs.release_type }} # untrusted input -> env, never inline in run
+      # The auto-release is always patch: the caller's input is empty on a push, and nothing a
+      # commit says can change the bump. Untrusted input -> env, never inline in run.
+      RELEASE_TYPE: ${{ github.event_name == 'push' && 'patch' || inputs.release_type }}
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
@@ -186,7 +191,7 @@ jobs:
   # 3. Build + package the tarball WITHOUT the publish token in scope.
   package:
     needs: [check, release]
-    # Run on dispatch (after release) OR on a UI-published release. The release job is
+    # Run on push or dispatch (after release) OR on a UI-published release. The release job is
     # skipped on the release-published path, so gate on success-or-skipped, not success.
     if: |
       always() &&
@@ -200,7 +205,7 @@ jobs:
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && needs.release.outputs.tag || github.ref }}
+          ref: ${{ github.event_name != 'release' && needs.release.outputs.tag || github.ref }}
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -229,7 +234,7 @@ jobs:
     if: |
       always() && inputs.publish && needs.package.result == 'success' &&
       (
-        (github.event_name == 'workflow_dispatch' && needs.release.result == 'success') ||
+        (github.event_name != 'release' && needs.release.result == 'success') ||
         github.event_name == 'release'
       )
     runs-on: ${{ inputs.runs_on }}
@@ -239,7 +244,7 @@ jobs:
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && needs.release.outputs.tag || github.ref }}
+          ref: ${{ github.event_name != 'release' && needs.release.outputs.tag || github.ref }}
           persist-credentials: false
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
@@ -266,10 +271,10 @@ jobs:
         run: |
           set -euo pipefail
           pkg="$(node -p "require('./package.json').version")"
-          if [ "$EVENT" = "workflow_dispatch" ]; then
-            want="$DISPATCH_VERSION"
-          else
+          if [ "$EVENT" = "release" ]; then
             want="${REF_NAME#v}" # release tag, e.g. v1.2.3
+          else
+            want="$DISPATCH_VERSION" # push or dispatch: the version the release job cut
           fi
           # Fail closed on mismatch AND on an empty ref (a skipped release job falling through).
           [ -n "$want" ] || { echo "empty version/ref — refusing to publish"; exit 1; }
