@@ -1,0 +1,51 @@
+name: Fleet status
+
+# For the organization's `.github` repository. Every hour it reads the state of every public
+# repository with `moku-release fleet` and puts the table into profile/README.md, the page
+# GitHub shows on the organization. It commits only when the table changed.
+#
+# No token is added: GITHUB_TOKEN reads the public repositories and writes this one.
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: fleet
+  cancel-in-progress: true
+
+permissions:
+  contents: write # commit profile/README.md
+
+jobs:
+  fleet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+      - name: Read the fleet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: npx --yes --package @moku-labs/ci@1 moku-release fleet --markdown > fleet.md
+      - name: Put the table between the markers of profile/README.md
+        run: |
+          set -euo pipefail
+          # An empty table means the read failed without an exit code; keep the old one.
+          [ -s fleet.md ] || { echo "fleet.md is empty"; exit 1; }
+          awk -v table=fleet.md '
+            /<!-- fleet:start -->/ { print; while ((getline line < table) > 0) print line; skip = 1; next }
+            /<!-- fleet:end -->/ { skip = 0 }
+            !skip
+          ' profile/README.md > README.next
+          mv README.next profile/README.md
+          rm fleet.md
+      - name: Commit when the table changed
+        run: |
+          set -euo pipefail
+          git diff --quiet && { echo "no change"; exit 0; }
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -qam "fleet: status"
+          git push

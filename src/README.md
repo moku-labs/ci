@@ -89,6 +89,8 @@ Both `setup` and the release command accept `--dry-run`, which prints every acti
 | `commands/setup.ts` | The idempotent one-time wizard. |
 | `commands/doctor.ts` | The read-only report (branded or `--json`), reused as the release preflight. |
 | `commands/release.ts` | Preflight → dispatch → watch → registry verification → summary. |
+| `commands/fleet.ts` | Organization from the remote → one GraphQL call → npm per package → table, Markdown or JSON. |
+| `lib/fleet.ts` | The query, the parser of its answer, the rules of what waits, the Markdown table. |
 | `commands/wait.ts` | HEAD on main → tag that holds it → registry verification → summary. Dispatches nothing. |
 | `checks/*.ts` | One diagnostic per file; `checks/index.ts` is the ordered registry. |
 | `lib/exec.ts` · `lib/files.ts` | The two injectable ports (`capture`/`inherit`, `read`/`write`/`backup`). |
