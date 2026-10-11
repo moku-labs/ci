@@ -19,6 +19,9 @@ export const HISTORY_DEPTH = 30;
 /** The scope every family package is published under. */
 const FAMILY_SCOPE = "@moku-labs/";
 
+/** The organization's profile repository. It holds the table itself and is not a row of it. */
+const PROFILE_REPO = ".github";
+
 /** Matches a release tag, prereleases included: `v1.2.3`, `v1.2.3-rc.0`. Not the moving `v1`. */
 const RELEASE_TAG = /^v\d+\.\d+\.\d+/;
 
@@ -347,7 +350,9 @@ export function parseFleet(stdout: string): FleetRepo[] | undefined {
   }
   if (!Array.isArray(nodes)) return undefined;
 
-  const rows = (nodes as RawRepo[]).map(raw => toRepo(raw));
+  const rows = (nodes as RawRepo[])
+    .filter(raw => raw.name !== PROFILE_REPO)
+    .map(raw => toRepo(raw));
   const newest = new Map(
     rows.flatMap(row =>
       row.packageName !== undefined && row.tag !== undefined

@@ -1,13 +1,13 @@
 name: Fleet status
 
-# For the organization's `.github` repository. Every hour it reads the state of every public
+# For the organization's `.github` repository. Every 15 minutes it reads the state of every public
 # repository with `moku-release fleet` and puts the table into profile/README.md, the page
 # GitHub shows on the organization. It commits only when the table changed.
 #
 # No token is added: GITHUB_TOKEN reads the public repositories and writes this one.
 on:
   schedule:
-    - cron: "17 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
 concurrency:
