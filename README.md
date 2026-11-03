@@ -5,7 +5,7 @@
 **One CI and release pipeline for every moku package.**
 
 Reusable GitHub workflows pinned by tag, plus the `moku-release` CLI that installs them
-into a project and runs a release. A project keeps two 20-line files and seven scripts;
+into a project and runs a release. A project keeps two 20-line files and eight scripts;
 everything else lives here, once. Not a build tool and not a framework — it calls your
 `package.json` scripts and never the tools behind them.
 
@@ -50,7 +50,6 @@ allows auto-merge. Run it again any time — it only does what is still missing.
 > `system`, `ai`, `native` — run `package-ci.yml` and `package-release.yml` from `@v1`, and each
 > has shipped a tokenless release with provenance through them. `moku-release setup` did every
 > one of those migrations live, including two first publishes behind 2FA.
-> `app-deploy.yml` has no live user yet.
 
 > [!IMPORTANT]
 > Two steps are yours alone. The CLI never handles a credential, and there is no `NPM_TOKEN`
@@ -78,7 +77,7 @@ allows auto-merge. Run it again any time — it only does what is still missing.
 
 ```mermaid
 flowchart LR
-  P["your project<br/>ci.yml · publish.yml<br/>7 scripts"] -->|"uses: …@v1"| W["moku-labs/ci<br/>reusable workflows"]
+  P["your project<br/>ci.yml · publish.yml<br/>8 scripts"] -->|"uses: …@v1"| W["moku-labs/ci<br/>reusable workflows"]
   C["moku-release<br/>setup · doctor · release"] -->|writes| P
   C -->|dispatches| W
   W --> N["checks on the PR<br/>tag · GitHub release · npm"]
@@ -217,7 +216,7 @@ The scripts are plain aliases of the `moku-release` bin. Internals and the list 
 
 ## The contract
 
-A package exposes exactly these seven scripts. `setup` adds the ones that are missing;
+A package exposes these eight scripts. `setup` adds the ones that are missing;
 `doctor` reports them.
 
 | Script | Used by |
@@ -227,8 +226,9 @@ A package exposes exactly these seven scripts. `setup` adds the ones that are mi
 | `lint` | `lint` job — biome check + eslint |
 | `typecheck` | `types` job — `tsc --noEmit` |
 | `test` | `test` job — `vitest run`, never `bun test` |
-| `lint:fix` | local only |
-| `format` | local only |
+| `release:setup` | you — `moku-release setup` |
+| `release:doctor` | you — `moku-release doctor` |
+| `release` | you — `moku-release` |
 
 Project-specific work goes inside the script. `room` needs a second typecheck pass, so its
 script is `"typecheck": "tsc --noEmit && tsc -p tsconfig.worker.json --noEmit"`. The central
